@@ -97,7 +97,35 @@ and normalize e = CompExp (ValExp (IntV 1))
 
 (* ==== recur式が末尾位置にのみ書かれていることを検査 ==== *)
 
-let recur_check e = ()
+let recur_check e =
+  let rec check e ok = match e with
+    S.BinOp (_, e1, e2) ->
+      check e1 false;
+      check e2 false;
+  | S.IfExp (e1, e2, e3) ->
+      check e1 false;
+      check e2 ok;
+      check e3 ok;
+  | S.LetExp (_, e1, e2) ->
+      check e1 false;
+      check e2 ok;
+  | S.FunExp (_, e) -> check e false;
+  | S.AppExp (e1, e2) ->
+      check e1 false;
+      check e2 false;
+  | S.LetRecExp (_, _, e1, e2) ->
+      check e1 false;
+      check e2 ok;
+  | S.LoopExp (_, e1, e2) ->
+      check e1 false;
+      check e2 true;
+  | S.RecurExp _ -> if ok then () else err "recur check failed"
+  | S.TupleExp (e1, e2) ->
+      check e1 false;
+      check e2 false;
+  | S.ProjExp (e, _) -> check e false;
+  | _ -> ()
+  in check e false
 
 
 (* ==== entry point ==== *)
