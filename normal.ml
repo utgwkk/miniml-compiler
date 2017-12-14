@@ -92,7 +92,133 @@ let string_of_norm e =
 
 (* ==== 正規形への変換 ==== *)
 
-and normalize e = CompExp (ValExp (IntV 1))
+and normalize e =
+  (* MiniML -> 言語Cへの変換I *)
+  let rec convert_I exp =
+    let change_varname src dst e =
+      (* 変数srcの名前をdstに変更 *)
+      let rec change e = match e with
+        S.Var x -> S.Var (if x = src then dst else x)
+      | S.ILit i -> S.ILit i
+      | S.BLit b -> S.BLit b
+      | S.BinOp (op, e1, e2) -> S.BinOp (op, change e1, change e2)
+      | S.IfExp (e1, e2, e3) -> S.IfExp (change e1, change e2, change e3)
+      | S.LetExp (x, e1, e2) -> S.LetExp (x, change e1, change e2)
+      | S.FunExp (x, e) -> S.FunExp (x, e)
+      | S.AppExp (e1, e2) -> S.AppExp (change e1, change e2)
+      | S.LetRecExp (f, x, e1, e2) -> S.LetRecExp (f, x, e1, change e2)
+      | S.LoopExp (x, e1, e2) -> S.LoopExp (x, change e1, change e2)
+      | S.RecurExp e -> S.RecurExp (change e)
+      | S.TupleExp (e1, e2) -> S.TupleExp (change e1, change e2)
+      | S.ProjExp (e, i) -> S.ProjExp (change e, i)
+      in change e
+    in
+    match exp with
+      S.Var x -> S.Var x
+    | S.ILit i -> S.ILit i
+    | S.BLit true -> S.ILit 1
+    | S.BLit false -> S.ILit 0
+    | S.BinOp (op, e1, e2) ->
+        let lhs = fresh_id "lhs" in
+        let rhs = fresh_id "rhs" in
+        S.LetExp (lhs, convert_I e1,
+          S.LetExp (rhs, convert_I e2,
+            S.BinOp (op, S.Var lhs, S.Var rhs)
+          )
+        )
+    | S.IfExp (e1, e2, e3) ->
+        let cond = fresh_id "cond" in
+        S.LetExp (cond, convert_I e1,
+          S.IfExp (S.Var cond,
+            convert_I e2,
+            convert_I e3
+          )
+        )
+    | S.LetExp (x, e1, e2) ->
+        let var = fresh_id "let" in
+        S.LetExp (var, convert_I e1, (convert_I e2) |> change_varname x var)
+    | S.FunExp (x, e) ->
+        let func = fresh_id "fun" in
+        convert_I @@ S.LetRecExp (func, x, e, S.Var func)
+    | S.AppExp (e1, e2) ->
+        let appfunc = fresh_id "app" in
+        let appval = fresh_id "appval" in
+        S.LetExp (appfunc, convert_I e1,
+          S.LetExp (appval, convert_I e2,
+            S.AppExp (S.Var appfunc, S.Var appval)
+          )
+        )
+    | S.LetRecExp (f, x, e1, e2) ->
+        let func = fresh_id "letrec" in
+        let arg = fresh_id "letrecarg" in
+        S.LetRecExp (func, arg, (convert_I e1) |> change_varname f func |> change_varname x arg, (convert_I e2) |> change_varname f func)
+    | S.LoopExp (x, e1, e2) ->
+        let var = fresh_id "loop" in
+        S.LoopExp (var, convert_I e1, (convert_I e2) |> change_varname x var)
+    | S.RecurExp e ->
+        let var = fresh_id "recur" in
+        S.LetExp (var, convert_I e, S.RecurExp (S.Var var))
+    | S.TupleExp (e1, e2) ->
+        let tup_fstvar = fresh_id "tuple_fst" in
+        let tup_sndvar = fresh_id "tuple_snd" in
+        let tupvar = fresh_id "tuple" in
+        S.LetExp (tup_fstvar, convert_I e1,
+          S.LetExp (tup_sndvar, convert_I e2,
+            S.LetExp (tupvar, S.TupleExp (S.Var tup_fstvar, S.Var tup_sndvar), S.Var tupvar)
+          )
+        )
+    | S.ProjExp (e, i) ->
+        let projvar = fresh_id "proj" in
+        S.LetExp (projvar, convert_I e, S.ProjExp (S.Var projvar, i))
+  in
+  (* 言語C -> 正規形への変換 *)
+  let rec convert_N exp =
+    (* let x = e1 in e2 / loop x = e1 in e2 の e1 中のletを外に出す *)
+    let rec unnest_let exp =
+      match exp with
+        S.LetExp (x, e1, e2) -> (
+          match e1 with
+            S.LetExp (ix, ie1, ie2) -> unnest_let @@ S.LetExp (ix, ie1, unnest_let @@ S.LetExp (x, ie2, e2))
+          | S.LetRecExp (ifun, ix, ie1, ie2) -> S.LetRecExp (ifun, ix, unnest_let ie1, unnest_let @@ S.LetExp (x, ie2, e2))
+          | _ -> S.LetExp (x, e1, unnest_let e2)
+      )
+      | S.LetRecExp (f, x, e1, e2) -> S.LetRecExp (f, x, e1, unnest_let e2)
+      | S.LoopExp (x, e1, e2) -> (
+          match e1 with
+            S.LetExp (ix, ie1, ie2) -> unnest_let @@ S.LetExp (ix, ie1, unnest_let @@ S.LoopExp (x, ie2, e2))
+          | S.LetRecExp (f, ix, ie1, ie2) -> S.LetRecExp (f, ix, ie1, unnest_let @@ S.LoopExp (x, ie2, e2))
+          | _ -> S.LoopExp (x, e1, unnest_let e2)
+      )
+      | _ -> exp
+    in
+    let value = function
+        S.Var x -> Var x
+      | S.ILit i -> IntV i
+      | _ -> err "cannot convert to value"
+    in
+    let unnested_exp = unnest_let exp in
+    match unnested_exp with
+      S.Var x -> CompExp (ValExp (Var x))
+    | S.ILit i -> CompExp (ValExp (IntV i))
+    | S.BLit _ -> err "boolean should be converted to integer on convert_I"
+    | S.BinOp (op, v1, v2) -> CompExp (BinOp (op, value v1, value v2))
+    | S.IfExp (e1, e2, e3) -> CompExp (IfExp (value e1, e2 |> convert_N, e3 |> convert_N))
+    | S.LetExp (x, e1, e2) -> (
+        match (convert_N e1) with
+          CompExp ce -> LetExp (x, ce, e2 |> convert_N)
+        | _ -> err "cannot uncomp"
+    )
+    | S.FunExp _ -> err "funexp should be converted to letrecexp on convert_I"
+    | S.AppExp (e1, e2) -> CompExp (AppExp (value e1, value e2))
+    | S.LetRecExp (f, x, e1, e2) -> LetRecExp (f, x, e1 |> convert_N, e2 |> convert_N)
+    | S.LoopExp (x, e1, e2) -> LoopExp (x, ValExp (value e1), e2 |> convert_N)
+    | S.RecurExp e -> RecurExp (value e)
+    | S.TupleExp (e1, e2) -> CompExp (TupleExp (value e1, value e2))
+    | S.ProjExp (e, i) -> CompExp (ProjExp (value e, i))
+  in
+  e
+  |> convert_I
+  |> convert_N
 
 
 (* ==== recur式が末尾位置にのみ書かれていることを検査 ==== *)
