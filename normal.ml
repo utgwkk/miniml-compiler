@@ -93,8 +93,8 @@ let string_of_norm e =
 (* ==== 正規形への変換 ==== *)
 
 and normalize e =
-  (* MiniML -> 言語Cへの変換I *)
-  let rec convert_I exp =
+  (* MiniML -> 言語Cへの変換I (継続渡しスタイル) *)
+  let rec convert_I exp k =
     let change_varname src dst e =
       (* 変数srcの名前をdstに変更 *)
       let rec change e = match e with
@@ -114,62 +114,77 @@ and normalize e =
       in change e
     in
     match exp with
-      S.Var x -> S.Var x
-    | S.ILit i -> S.ILit i
-    | S.BLit true -> S.ILit 1
-    | S.BLit false -> S.ILit 0
+      S.Var x -> k (S.Var x)
+    | S.ILit i -> k (S.ILit i)
+    | S.BLit true -> k (S.ILit 1)
+    | S.BLit false -> k (S.ILit 0)
     | S.BinOp (op, e1, e2) ->
         let lhs = fresh_id "lhs" in
         let rhs = fresh_id "rhs" in
-        S.LetExp (lhs, convert_I e1,
-          S.LetExp (rhs, convert_I e2,
-            S.BinOp (op, S.Var lhs, S.Var rhs)
+        convert_I e1
+          (fun x -> convert_I e2 (
+            fun y -> k (S.LetExp (lhs, x, S.LetExp (rhs, y, S.BinOp (op, S.Var lhs, S.Var rhs)))))
           )
-        )
     | S.IfExp (e1, e2, e3) ->
         let cond = fresh_id "cond" in
-        S.LetExp (cond, convert_I e1,
-          S.IfExp (S.Var cond,
-            convert_I e2,
-            convert_I e3
+        convert_I e1
+          (fun x -> convert_I e2 (
+            fun y -> convert_I e3 (
+              fun z -> k (S.LetExp (cond, x, S.IfExp (S.Var cond, y, z))))
+            )
           )
-        )
-    | S.LetExp (x, e1, e2) ->
+    | S.LetExp (id, e1, e2) ->
         let var = fresh_id "let" in
-        S.LetExp (var, convert_I e1, (convert_I e2) |> change_varname x var)
+        convert_I e1
+          (fun x -> convert_I (change_varname id var e2)
+            (fun y -> k (S.LetExp (var, x, y))
+            )
+          )
     | S.FunExp (x, e) ->
         let func = fresh_id "fun" in
-        convert_I @@ S.LetRecExp (func, x, e, S.Var func)
+        convert_I (S.LetRecExp (func, x, e, S.Var func)) k
     | S.AppExp (e1, e2) ->
         let appfunc = fresh_id "app" in
         let appval = fresh_id "appval" in
-        S.LetExp (appfunc, convert_I e1,
-          S.LetExp (appval, convert_I e2,
-            S.AppExp (S.Var appfunc, S.Var appval)
+        convert_I e1 (fun x ->
+          convert_I e2 (fun y ->
+            k (S.LetExp (appfunc, x, S.LetExp (appval, y, S.AppExp (S.Var appfunc, S.Var appval))))
           )
         )
     | S.LetRecExp (f, x, e1, e2) ->
         let func = fresh_id "letrec" in
         let arg = fresh_id "letrecarg" in
-        S.LetRecExp (func, arg, (convert_I e1) |> change_varname f func |> change_varname x arg, (convert_I e2) |> change_varname f func)
-    | S.LoopExp (x, e1, e2) ->
+        convert_I (e1 |> change_varname f func |> change_varname x arg) (fun x ->
+          convert_I (e2 |> change_varname f func) (fun y ->
+            k (S.LetRecExp (func, arg, x, y))
+          )
+        )
+    | S.LoopExp (id, e1, e2) ->
         let var = fresh_id "loop" in
-        S.LoopExp (var, convert_I e1, (convert_I e2) |> change_varname x var)
+        convert_I e1 (fun x ->
+          convert_I (change_varname id var e2) (fun y ->
+            k (S.LoopExp (var, x, y))
+          )
+        )
     | S.RecurExp e ->
         let var = fresh_id "recur" in
-        S.LetExp (var, convert_I e, S.RecurExp (S.Var var))
+        convert_I e (fun x -> k (S.LetExp (var, x, S.RecurExp (S.Var var))))
     | S.TupleExp (e1, e2) ->
         let tup_fstvar = fresh_id "tuple_fst" in
         let tup_sndvar = fresh_id "tuple_snd" in
         let tupvar = fresh_id "tuple" in
-        S.LetExp (tup_fstvar, convert_I e1,
-          S.LetExp (tup_sndvar, convert_I e2,
-            S.LetExp (tupvar, S.TupleExp (S.Var tup_fstvar, S.Var tup_sndvar), S.Var tupvar)
+        convert_I e1 (fun x ->
+          convert_I e2 (fun y -> k (
+            S.LetExp (tup_fstvar, x,
+              S.LetExp (tup_sndvar, y,
+                S.LetExp (tupvar, S.TupleExp (S.Var tup_fstvar, S.Var tup_sndvar), S.Var tupvar))
+              )
+            )
           )
         )
     | S.ProjExp (e, i) ->
         let projvar = fresh_id "proj" in
-        S.LetExp (projvar, convert_I e, S.ProjExp (S.Var projvar, i))
+        convert_I e (fun x -> k (S.LetExp (projvar, x, S.ProjExp (S.Var projvar, i))))
   in
   (* 言語C -> 正規形への変換 *)
   let rec convert_N exp =
@@ -216,9 +231,7 @@ and normalize e =
     | S.TupleExp (e1, e2) -> CompExp (TupleExp (value e1, value e2))
     | S.ProjExp (e, i) -> CompExp (ProjExp (value e, i))
   in
-  e
-  |> convert_I
-  |> convert_N
+  convert_I e convert_N
 
 
 (* ==== recur式が末尾位置にのみ書かれていることを検査 ==== *)
