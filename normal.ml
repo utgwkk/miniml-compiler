@@ -136,8 +136,8 @@ and normalize e =
     | S.LetExp (id, e1, e2) ->
         let var = fresh_id "let" in
         convert_I e1
-          (fun x -> convert_I (change_varname id var e2)
-            (fun y -> k (S.LetExp (var, x, y))
+          (fun x -> convert_I e2
+            (fun y -> k (change_varname id var (S.LetExp (var, x, y)))
             )
           )
     | S.FunExp (x, e) ->
