@@ -55,4 +55,8 @@ clean:
 depend:: $(DEPEND)
 	$(OCAMLDEP) $(INCLUDES) *.mli *.ml > .depend
 
+.PHONY: test
+test: all
+	./test.sh
+
 -include .depend

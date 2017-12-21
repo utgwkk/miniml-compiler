@@ -3,9 +3,9 @@ open Syntax
 
 %}
 
-%token LPAREN RPAREN SEMISEMI RARROW
+%token LPAREN RPAREN SEMISEMI RARROW DOT COMMA
 %token PLUS MULT LT EQ
-%token IF THEN ELSE TRUE FALSE LET IN FUN REC
+%token IF THEN ELSE TRUE FALSE LET IN FUN REC LOOP RECUR
 
 %token <int> INTV
 %token <Syntax.id> ID
@@ -22,11 +22,15 @@ Expr :
   | e=FunExpr    { e }
   | e=LetExpr    { e }
   | e=LetRecExpr { e }
+  | e=LoopExpr   { e }
   | e=LTExpr     { e }
 
 LTExpr :
     e1=PExpr LT e2=PExpr { BinOp (Lt, e1, e2) }
   | e=PExpr { e }
+
+LoopExpr :
+    LOOP i=ID EQ e1=Expr IN e2=Expr { LoopExp (i, e1, e2) }
 
 PExpr :
     e1=PExpr PLUS e2=MExpr { BinOp (Plus, e1, e2) }
@@ -38,6 +42,7 @@ MExpr :
 
 AppExpr :
     e1=AppExpr e2=AExpr { AppExp (e1, e2) }
+  | RECUR e=AExpr { RecurExp e }
   | e=AExpr { e }
 
 AExpr :
@@ -46,6 +51,8 @@ AExpr :
   | FALSE { BLit false }
   | i=ID { Var i }
   | LPAREN e=Expr RPAREN { e }
+  | LPAREN e1=Expr COMMA e2=Expr RPAREN { TupleExp (e1, e2) }
+  | e=AExpr DOT i=INTV { ProjExp (e, i) }
 
 IfExpr :
     IF e1=Expr THEN e2=Expr ELSE e3=Expr { IfExp (e1, e2, e3) }
