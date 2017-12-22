@@ -237,6 +237,67 @@ and normalize e =
         let projvar = fresh_id "proj" in
         convert_I env e (fun x -> k (S.LetExp (projvar, x, S.ProjExp (S.Var projvar, i))))
   in
+  (* 言語C上でベータ簡約を行う *)
+  let rec beta env exp k =
+      match exp with
+      S.Var x ->
+        let newvar = try Environment.lookup x env with Environment.Not_bound -> x in
+        k (S.Var newvar)
+    | S.ILit i -> k (S.ILit i)
+    | S.BinOp (op, e1, e2) ->
+        beta env e1 (fun x ->
+          beta env e2 (fun y -> k (
+          S.BinOp (op, x, y))
+        )
+      )
+    | S.IfExp (e1, e2, e3) ->
+        beta env e1 (fun x ->
+          beta env e2 (fun y ->
+            beta env e3 (fun z -> k (
+            S.IfExp (x, y, z))
+          )
+        )
+      )
+    | S.LetExp (id, e1, e2) -> (
+          match e1 with
+        S.Var id2 -> let newenv = Environment.extend id id2 env in beta newenv e2 k
+      | e ->
+        beta env e1 (fun x ->
+          beta env e2 (fun y -> k (
+          S.LetExp (id, x, y))
+          )
+        )
+    )
+    | S.FunExp (id, e) ->
+        beta env e (fun x -> k (S.FunExp (id, x)))
+    | S.AppExp (e1, e2) ->
+        beta env e1 (fun x ->
+          beta env e2 (fun y -> k (
+          S.AppExp (x, y))
+        )
+      )
+    | S.LetRecExp (id, para, e1, e2) ->
+        beta env e1 (fun x ->
+          beta env e2 (fun y -> k (
+          S.LetRecExp (id, para, x, y))
+        )
+      )
+    | S.LoopExp (id, e1, e2) ->
+        beta env e1 (fun x ->
+          beta env e2 (fun y -> k (
+          S.LoopExp (id, x, y))
+        )
+      )
+    | S.RecurExp e -> beta env e (fun x -> k (S.RecurExp x))
+    | S.TupleExp (e1, e2) ->
+        beta env e1 (fun x ->
+          beta env e2 (fun y -> k (
+          S.TupleExp (x, y))
+        )
+      )
+    | S.ProjExp (e, i) ->
+        beta env e (fun x -> k (S.ProjExp (x, i)))
+  in
   (* 言語C上でコピー伝播を行う *)
   let rec copy_propagation (map : (S.id, S.exp) MyMap.t) (exp : S.exp) k =
       match exp with
@@ -354,9 +415,10 @@ and normalize e =
   in
   until_fix fold_const e (fun x ->
   convert_I (Environment.empty) x (fun x ->
+  beta (Environment.empty) x (fun x ->
   until_fix (fun x -> (copy_propagation MyMap.empty) x fold_const) x (fun x ->
   convert_N x
-  )))
+  ))))
 
 
 (* ==== recur式が末尾位置にのみ書かれていることを検査 ==== *)
