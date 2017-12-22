@@ -282,8 +282,16 @@ and normalize e =
     | S.TupleExp (e1, e2) -> CompExp (TupleExp (value e1, value e2))
     | S.ProjExp (e, i) -> CompExp (ProjExp (value e, i))
   in
+  (* 変換を適用した結果が変わらなくなるまで適用する *)
+  let rec until_fix f e k =
+    let applied = f e (fun x -> x) in
+    if e = applied then k applied
+    else until_fix f applied k
+  in
   convert_I (Environment.empty) e (fun x ->
-    copy_propagation (MyMap.empty) x convert_N)
+    until_fix (copy_propagation (MyMap.empty)) x (fun x ->
+  convert_N x
+  ))
 
 
 (* ==== recur式が末尾位置にのみ書かれていることを検査 ==== *)
