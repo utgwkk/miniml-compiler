@@ -94,87 +94,74 @@ let string_of_norm e =
 
 and normalize e =
   (* MiniML -> 言語Cへの変換I (継続渡しスタイル) *)
-  let rec convert_I exp k =
-    let change_varname src dst e =
-      (* 変数srcの名前をdstに変更 *)
-      let rec change e = match e with
-        S.Var x -> S.Var (if x = src then dst else x)
-      | S.ILit i -> S.ILit i
-      | S.BLit b -> S.BLit b
-      | S.BinOp (op, e1, e2) -> S.BinOp (op, change e1, change e2)
-      | S.IfExp (e1, e2, e3) -> S.IfExp (change e1, change e2, change e3)
-      | S.LetExp (x, e1, e2) -> S.LetExp (x, change e1, change e2)
-      | S.FunExp (x, e) -> S.FunExp (x, e)
-      | S.AppExp (e1, e2) -> S.AppExp (change e1, change e2)
-      | S.LetRecExp (f, x, e1, e2) -> S.LetRecExp (f, x, e1, change e2)
-      | S.LoopExp (x, e1, e2) -> S.LoopExp (x, change e1, change e2)
-      | S.RecurExp e -> S.RecurExp (change e)
-      | S.TupleExp (e1, e2) -> S.TupleExp (change e1, change e2)
-      | S.ProjExp (e, i) -> S.ProjExp (change e, i)
-      in change e
-    in
+  let rec convert_I env exp k =
     match exp with
-      S.Var x -> k (S.Var x)
+      S.Var x ->
+        let newid = try (Environment.lookup x env) with Not_found -> x in
+        k (S.Var newid)
     | S.ILit i -> k (S.ILit i)
     | S.BLit true -> k (S.ILit 1)
     | S.BLit false -> k (S.ILit 0)
     | S.BinOp (op, e1, e2) ->
         let lhs = fresh_id "lhs" in
         let rhs = fresh_id "rhs" in
-        convert_I e1
-          (fun x -> convert_I e2 (
+        convert_I env e1
+          (fun x -> convert_I env e2 (
             fun y -> k (S.LetExp (lhs, x, S.LetExp (rhs, y, S.BinOp (op, S.Var lhs, S.Var rhs)))))
           )
     | S.IfExp (e1, e2, e3) ->
         let cond = fresh_id "cond" in
-        convert_I e1
-          (fun x -> convert_I e2 (
-            fun y -> convert_I e3 (
+        convert_I env e1
+          (fun x -> convert_I env e2 (
+            fun y -> convert_I env e3 (
               fun z -> k (S.LetExp (cond, x, S.IfExp (S.Var cond, y, z))))
             )
           )
     | S.LetExp (id, e1, e2) ->
         let var = fresh_id "let" in
-        convert_I e1
-          (fun x -> convert_I e2
-            (fun y -> k (change_varname id var (S.LetExp (var, x, y)))
+        let newenv = Environment.extend id var env in
+        convert_I env e1
+          (fun x -> convert_I newenv e2
+            (fun y -> k (S.LetExp (var, x, y))
             )
           )
     | S.FunExp (x, e) ->
         let func = fresh_id "fun" in
-        convert_I (S.LetRecExp (func, x, e, S.Var func)) k
+        convert_I env (S.LetRecExp (func, x, e, S.Var func)) k
     | S.AppExp (e1, e2) ->
         let appfunc = fresh_id "app" in
         let appval = fresh_id "appval" in
-        convert_I e1 (fun x ->
-          convert_I e2 (fun y ->
+        convert_I env e1 (fun x ->
+          convert_I env e2 (fun y ->
             k (S.LetExp (appfunc, x, S.LetExp (appval, y, S.AppExp (S.Var appfunc, S.Var appval))))
           )
         )
     | S.LetRecExp (f, x, e1, e2) ->
         let func = fresh_id "letrec" in
         let arg = fresh_id "letrecarg" in
-        convert_I (e1 |> change_varname f func |> change_varname x arg) (fun x ->
-          convert_I (e2 |> change_varname f func) (fun y ->
+        let newenv = Environment.extend f func env in
+        convert_I (Environment.extend x arg newenv) e1 (fun x ->
+          convert_I newenv e2 (fun y ->
             k (S.LetRecExp (func, arg, x, y))
           )
         )
     | S.LoopExp (id, e1, e2) ->
         let var = fresh_id "loop" in
-        convert_I e1 (fun x ->
-          convert_I (change_varname id var e2) (fun y ->
+        let newenv = Environment.extend id var env in
+        convert_I env e1 (fun x ->
+          convert_I newenv e2 (fun y ->
             k (S.LoopExp (var, x, y))
           )
         )
     | S.RecurExp e ->
         let var = fresh_id "recur" in
-        convert_I e (fun x -> k (S.LetExp (var, x, S.RecurExp (S.Var var))))
+        convert_I env e (fun x -> k (S.LetExp (var, x, S.RecurExp (S.Var var))))
     | S.TupleExp (e1, e2) ->
         let tup_fstvar = fresh_id "tuple_fst" in
         let tup_sndvar = fresh_id "tuple_snd" in
         let tupvar = fresh_id "tuple" in
-        convert_I e1 (fun x ->
-          convert_I e2 (fun y -> k (
+        convert_I env e1 (fun x ->
+          convert_I env e2 (fun y -> k (
             S.LetExp (tup_fstvar, x,
               S.LetExp (tup_sndvar, y,
                 S.LetExp (tupvar, S.TupleExp (S.Var tup_fstvar, S.Var tup_sndvar), S.Var tupvar))
@@ -184,7 +171,7 @@ and normalize e =
         )
     | S.ProjExp (e, i) ->
         let projvar = fresh_id "proj" in
-        convert_I e (fun x -> k (S.LetExp (projvar, x, S.ProjExp (S.Var projvar, i))))
+        convert_I env e (fun x -> k (S.LetExp (projvar, x, S.ProjExp (S.Var projvar, i))))
   in
   (* 言語C -> 正規形への変換 *)
   let rec convert_N exp =
@@ -231,7 +218,7 @@ and normalize e =
     | S.TupleExp (e1, e2) -> CompExp (TupleExp (value e1, value e2))
     | S.ProjExp (e, i) -> CompExp (ProjExp (value e, i))
   in
-  convert_I e convert_N
+  convert_I (Environment.empty) e convert_N
 
 
 (* ==== recur式が末尾位置にのみ書かれていることを検査 ==== *)
