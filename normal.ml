@@ -173,6 +173,70 @@ and normalize e =
         let projvar = fresh_id "proj" in
         convert_I env e (fun x -> k (S.LetExp (projvar, x, S.ProjExp (S.Var projvar, i))))
   in
+  (* 言語C上でコピー伝播を行う *)
+  let rec copy_propagation (map : (S.id, S.exp) MyMap.t) (exp : S.exp) k =
+      match exp with
+      S.Var x -> (
+        match MyMap.get x map with
+          Some newexp -> k newexp
+        | None -> k exp
+    )
+    | S.BinOp (op, e1, e2) ->
+        copy_propagation map e1 (fun x ->
+          copy_propagation map e2 (fun y -> k (
+            S.BinOp (op, x, y))
+          )
+        )
+    | S.IfExp (e1, e2, e3) ->
+        copy_propagation map e1 (fun x ->
+          copy_propagation map e2 (fun y ->
+            copy_propagation map e3 (fun z -> k (
+              S.IfExp (x, y, z))
+            )
+          )
+        )
+    | S.LetExp (id, e1, e2) -> (
+        match e1 with
+      | S.ILit _ ->
+          let newmap = MyMap.merge map (MyMap.singleton id e1) in
+          copy_propagation newmap e2 (fun x -> k x)
+      | _ -> copy_propagation map e1 (fun x ->
+               copy_propagation map e2 (fun y -> k (S.LetExp (id, x, y))
+            )
+          )
+    )
+    | S.FunExp (id, e) ->
+        copy_propagation map e (fun x -> k (S.FunExp (id, x)))
+    | S.AppExp (e1, e2) ->
+        copy_propagation map e1 (fun x ->
+          copy_propagation map e2 (fun y -> k (
+            S.AppExp (x, y))
+          )
+        )
+    | S.LetRecExp (func, id, e1, e2) ->
+        copy_propagation map e1 (fun x ->
+          copy_propagation map e2 (fun y -> k (
+            S.LetRecExp (func, id, x, y)
+        )
+      )
+    )
+    | S.LoopExp (id, e1, e2) ->
+        copy_propagation map e1 (fun x ->
+          copy_propagation map e2 (fun y -> k (
+            S.LoopExp (id, x, y))
+      )
+    )
+    | S.RecurExp e ->
+        copy_propagation map e (fun x -> k (S.RecurExp x))
+    | S.TupleExp (e1, e2) ->
+        copy_propagation map e1 (fun x ->
+          copy_propagation map e2 (fun y -> k (S.TupleExp (x, y))
+      )
+    )
+    | S.ProjExp (e, i) ->
+        copy_propagation map e (fun x -> k (S.ProjExp (x, i)))
+    | _ -> k exp
+  in
   (* 言語C -> 正規形への変換 *)
   let rec convert_N exp =
     (* let x = e1 in e2 / loop x = e1 in e2 の e1 中のletを外に出す *)
@@ -218,7 +282,8 @@ and normalize e =
     | S.TupleExp (e1, e2) -> CompExp (TupleExp (value e1, value e2))
     | S.ProjExp (e, i) -> CompExp (ProjExp (value e, i))
   in
-  convert_I (Environment.empty) e convert_N
+  convert_I (Environment.empty) e (fun x ->
+    copy_propagation (MyMap.empty) x convert_N)
 
 
 (* ==== recur式が末尾位置にのみ書かれていることを検査 ==== *)
