@@ -93,6 +93,70 @@ let string_of_norm e =
 (* ==== 正規形への変換 ==== *)
 
 and normalize e =
+  (* 言語C上で定数畳み込みを行う
+   * - 定数
+   * - if式
+   * - タプルの射影 *)
+  let rec fold_const exp k =
+    (* 二項演算を計算する *)
+    let apply_prim op e1 e2 = match op, e1, e2 with
+        S.Plus, S.ILit i1, S.ILit i2 -> Some (S.ILit (i1 + i2))
+      | S.Plus, _, _ -> None
+      | S.Mult, S.ILit i1, S.ILit i2 -> Some (S.ILit (i1 * i2))
+      | S.Mult, _, _ -> None
+      | S.Lt, S.ILit i1, S.ILit i2 -> Some (S.BLit (i1 < i2))
+      | S.Lt, _, _ -> None
+    in
+      match exp with
+    | S.BinOp (op, e1, e2) ->
+        fold_const e1 (fun lhs ->
+          fold_const e2 (fun rhs ->
+            match (apply_prim op lhs rhs) with
+              Some res -> k res
+            | None -> k exp
+      ))
+    | S.IfExp (e1, e2, e3) ->
+        fold_const e1 (fun cond ->
+          fold_const e2 (fun ok ->
+            fold_const e3 (fun ng ->
+              if cond = S.BLit true then k ok
+              else if cond = S.BLit false then k ng
+              else k (S.IfExp (cond, ok, ng))
+      )))
+    | S.LetExp (id, e1, e2) ->
+        fold_const e1 (fun x ->
+          fold_const e2 (fun y -> k (S.LetExp (id, x, y))
+      ))
+    | S.FunExp (id, e) ->
+        fold_const e (fun x -> k (S.FunExp (id, x))
+      )
+    | S.AppExp (e1, e2) ->
+        fold_const e1 (fun x ->
+          fold_const e2 (fun y -> k (S.AppExp (x, y))
+      ))
+    | S.LetRecExp (id, para, e1, e2) ->
+        fold_const e1 (fun x ->
+          fold_const e2 (fun y -> k (S.LetRecExp (id, para, x, y))
+      ))
+    | S.LoopExp (id, e1, e2) ->
+        fold_const e1 (fun x ->
+          fold_const e2 (fun y -> k (S.LoopExp (id, x, y))
+      ))
+    | S.RecurExp e ->
+        fold_const e (fun x -> k (S.RecurExp x)
+      )
+    | S.TupleExp (e1, e2) ->
+        fold_const e1 (fun x ->
+          fold_const e2 (fun y -> k (S.TupleExp (x, y))
+      ))
+    | S.ProjExp (e, i) ->
+        fold_const e (fun tup ->
+            match tup with
+          S.TupleExp (fst, snd) -> k (if i = 1 then fst else if i = 2 then snd else err "index out of range")
+        | _ -> k (S.ProjExp (tup, i))
+      )
+    | _ -> k exp
+  in
   (* MiniML -> 言語Cへの変換I (継続渡しスタイル) *)
   let rec convert_I env exp k =
     match exp with
@@ -288,10 +352,11 @@ and normalize e =
     if e = applied then k applied
     else until_fix f applied k
   in
-  convert_I (Environment.empty) e (fun x ->
-    until_fix (copy_propagation (MyMap.empty)) x (fun x ->
+  until_fix fold_const e (fun x ->
+  convert_I (Environment.empty) x (fun x ->
+  until_fix (fun x -> (copy_propagation MyMap.empty) x fold_const) x (fun x ->
   convert_N x
-  ))
+  )))
 
 
 (* ==== recur式が末尾位置にのみ書かれていることを検査 ==== *)
