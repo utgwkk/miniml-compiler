@@ -115,4 +115,37 @@ let string_of_flat prog =
 (* ==== フラット化：変数参照と関数参照の区別も同時に行う ==== *)
 
 let flatten exp =
-  [RecDecl ("_toplevel", ["p0"; "p1"], CompExp (ValExp (IntV 1)))]
+  let decls = ref [] in
+  (* 閉じた正規形をフラットにする
+   * 同時にlet recを参照先のdecl listに貯めていく *)
+  let convert exp =
+    let f_val env = function
+        C.Var v -> (try Environment.lookup v env with Environment.Not_bound -> err ("not bound: " ^ v))
+      | C.IntV i -> IntV i
+    in
+    let rec f_cexp env = function
+        C.ValExp v -> ValExp (f_val env v)
+      | C.BinOp (op, v1, v2) -> BinOp (op, f_val env v1, f_val env v2)
+      | C.AppExp (v1, vs) -> AppExp (f_val env v1, List.map (f_val env) vs)
+      | C.IfExp (v, e1, e2) -> IfExp (f_val env v, f_exp env e1, f_exp env e2)
+      | C.TupleExp vs -> TupleExp (List.map (f_val env) vs)
+      | C.ProjExp (v, i) -> ProjExp (f_val env v, i)
+    and f_exp env = function
+        C.CompExp ce -> CompExp (f_cexp env ce)
+      | C.LetExp (id, ce, e) ->
+          let newenv = Environment.extend id (Var id) env in
+          LetExp (id, f_cexp env ce, f_exp newenv e)
+      | C.LetRecExp (id, para, e1, e2) ->
+          let newenv = Environment.extend id (Fun id) (List.fold_right (fun x e -> Environment.extend x (Var x) e) para env) in
+          let newe1 = f_exp newenv e1 in
+          decls := RecDecl (id, para, newe1) :: !decls;
+          f_exp newenv e2
+      | C.LoopExp (id, ce, e) ->
+          let newenv = Environment.extend id (Var id) env in
+          LoopExp (id, f_cexp env ce, f_exp newenv e)
+      | C.RecurExp v -> RecurExp (f_val env v)
+    in f_exp Environment.empty exp
+  in
+  let flattened = convert exp
+  (* decl listを _toplevel の前につなげる *)
+  in List.rev_append !decls [RecDecl ("_toplevel", ["p0"; "p1"], flattened)]
