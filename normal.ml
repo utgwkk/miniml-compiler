@@ -97,7 +97,7 @@ and normalize e =
   let rec convert_I env exp k =
     match exp with
       S.Var x ->
-        let newid = try (Environment.lookup x env) with Not_found -> x in
+        let newid = try (Environment.lookup x env) with Environment.Not_bound -> x in
         k (S.Var newid)
     | S.ILit i -> k (S.ILit i)
     | S.BLit true -> k (S.ILit 1)
