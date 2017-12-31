@@ -213,7 +213,11 @@ and normalize e =
     | S.FunExp _ -> err "funexp should be converted to letrecexp on convert_I"
     | S.AppExp (e1, e2) -> CompExp (AppExp (value e1, value e2))
     | S.LetRecExp (f, x, e1, e2) -> LetRecExp (f, x, e1 |> convert_N, e2 |> convert_N)
-    | S.LoopExp (x, e1, e2) -> LoopExp (x, ValExp (value e1), e2 |> convert_N)
+    | S.LoopExp (x, e1, e2) -> (
+        match (convert_N e1) with
+          CompExp ce -> LoopExp (x, ce, e2 |> convert_N)
+        | _ -> err "cannot uncomp"
+    )
     | S.RecurExp e -> RecurExp (value e)
     | S.TupleExp (e1, e2) -> CompExp (TupleExp (value e1, value e2))
     | S.ProjExp (e, i) -> CompExp (ProjExp (value e, i))
