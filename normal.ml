@@ -413,12 +413,12 @@ and normalize e =
     if e = applied then k applied
     else until_fix f applied k
   in
-  until_fix fold_const e (fun x ->
-  convert_I (Environment.empty) x (fun x ->
-  beta (Environment.empty) x (fun x ->
-  until_fix (fun x -> (copy_propagation MyMap.empty) x fold_const) x (fun x ->
-  convert_N x
-  ))))
+  let (>>=) f g = f (fun x -> g x) in
+  until_fix fold_const e
+  >>= convert_I Environment.empty
+  >>= beta Environment.empty
+  >>= until_fix (fun x -> (copy_propagation MyMap.empty) x fold_const)
+  >>= convert_N
 
 
 (* ==== recur式が末尾位置にのみ書かれていることを検査 ==== *)
