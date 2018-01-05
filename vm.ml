@@ -9,6 +9,8 @@ type binOp = S.binOp
 type id = int
 type label = string
 
+let fresh_label = Misc.fresh_id_maker "_"
+
 type operand =
     Param of int     (* param(n) *)
   | Local of id      (* local(ofs) *)
@@ -92,9 +94,65 @@ let string_of_vm prog =
 (* ==== 仮想機械コードへの変換 ==== *)
 
 let trans_decl (F.RecDecl (proc_name, params, body)) =
-  ProcDecl (proc_name, 0,
-            [Move (0, IntV 1);
-             Return (Local 0)])
+  let local_count = ref 0 in
+  let value_to_operand env = function
+      F.Var x -> Environment.lookup x env
+    | F.Fun f -> Proc f
+    | F.IntV i -> IntV i
+  in
+  let rec trans_cexp env target = function
+      F.ValExp value ->
+        [Move (target, value_to_operand env value)]
+    | F.BinOp (op, v1, v2) ->
+        let lhs = value_to_operand env v1 in
+        let rhs = value_to_operand env v2 in
+        [BinOp (target, op, lhs, rhs)]
+    | F.AppExp (v1, v2) ->
+        let appfun = value_to_operand env v1 in
+        let apparg = List.map (value_to_operand env) v2 in
+        [Call (target, appfun, apparg)]
+    | F.IfExp (cond, e1, e2) ->
+        let ifcond = value_to_operand env cond in
+        let iftrue = trans_exp env target e1 in
+        let iffalse = trans_exp env target e2 in
+        let iftrue_label = fresh_label "iftrue" in
+        let endif_label = fresh_label "endif" in
+        [BranchIf (ifcond, iftrue_label)] @ iffalse @ [Goto endif_label; Label iftrue_label] @ iftrue @ [Label endif_label]
+    | F.TupleExp values ->
+        [Malloc (target, List.map (value_to_operand env) values)]
+    | F.ProjExp (value, idx) ->
+        let projval = value_to_operand env value in
+        [Read (target, projval, idx)]
+  and trans_exp env target = function
+      F.CompExp cexp -> trans_cexp env target cexp
+    | F.LetExp (id, cexp, exp) ->
+        let let_target = !local_count in
+        let newenv = Environment.extend id (Local let_target) env in
+        local_count := !local_count + 1;
+        (trans_cexp env let_target cexp) @ (trans_exp newenv target exp)
+    | F.LoopExp (id, cexp, exp) ->
+        let loop_target = !local_count in
+        local_count := !local_count + 1;
+        let looplabel = fresh_label "loop" in
+        let newenv = Environment.extend id (Local loop_target) @@ Environment.extend "__loop__" (Proc looplabel) @@ Environment.extend "__loopvar__" (Local loop_target) env in
+        (trans_cexp env loop_target cexp) @ [Label looplabel] @ (trans_exp newenv target exp)
+    | F.RecurExp value ->
+        let Proc(loop_label) = Environment.lookup "__loop__" env in
+        [Move (target, value_to_operand env value); Goto loop_label]
+  in
+  let rec enumerate idx = function
+      [] -> []
+    | h::t -> (idx, h)::(enumerate (idx + 1) t)
+  in
+  let env =
+    let rec extend env = function
+      [] -> env
+    | (num, id)::t -> extend (Environment.extend id (Param num) env) t
+    in extend Environment.empty @@ enumerate 0 params
+  in
+  let transed_body = trans_exp env 0 body in
+  let nlocals = !local_count in
+  ProcDecl (proc_name, nlocals, transed_body @ [Return (Local 0)])
 
 (* entry point *)
 let trans = List.map trans_decl
