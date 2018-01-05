@@ -3,7 +3,7 @@ set -e
 
 success=0
 failure=0
-verbosity=0
+verbosity=${VERBOSITY:=0}
 
 for testcase in input/*.ml;
 do
