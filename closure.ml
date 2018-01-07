@@ -151,7 +151,15 @@ let convert exp =
     | N.IntV i -> N.IntV i
     in
     let rec c_cexp = function
-        N.ValExp v -> N.ValExp (c_val v)
+        N.ValExp v -> (
+          match v with
+            N.Var x -> (
+            match (find x freevars) with
+              Some idx -> N.ProjExp (N.Var f, idx + 1)
+            | None -> N.ValExp v
+          )
+          | _ -> N.ValExp v
+        )
       | N.BinOp (op, v1, v2) -> N.BinOp (op, c_val v1, c_val v2)
       | N.AppExp (v1, v2) -> N.AppExp (c_val v1, c_val v2)
       | N.IfExp (v, e1, e2) -> N.IfExp (c_val v, c_exp e1, c_exp e2)
@@ -163,7 +171,7 @@ let convert exp =
         let newce = match ce with
           N.ValExp (N.Var x) -> (
             match (find x freevars) with
-              Some idx -> N.ProjExp (N.Var f, idx)
+              Some idx -> N.ProjExp (N.Var f, idx + 1)
             | None -> N.ValExp (N.Var x)
           )
           | _ -> c_cexp ce
@@ -202,7 +210,7 @@ let convert exp =
     | N.AppExp (N.IntV _, _) -> err "cannot apply function to int"
     | N.IfExp (v, e1, e2) -> IfExp (closure_conv_value v, closure_conv_exp e1, closure_conv_exp e2)
     | N.TupleExp (v1, v2) -> TupleExp [closure_conv_value v1; closure_conv_value v2]
-    | N.ProjExp (v, i) -> ProjExp (closure_conv_value v, i)
+    | N.ProjExp (v, i) -> ProjExp (closure_conv_value v, i - 1)
   and closure_conv_exp = function
       N.CompExp cexp -> CompExp (closure_conv_cexp cexp)
     | N.LetExp (x, ce1, e2) ->
