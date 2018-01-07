@@ -31,6 +31,7 @@ type addr =
   | R  of reg         (* レジスタ(Register) *)
   | L  of label       (* ラベル(Label) *)
   | RI of reg * imm   (* レジスタ間接(Register Indirect) *)
+  | BIGI of imm       (* 大きくなりうる即値(ldr命令のオペランドに使用) *)
 
 (* ==== 命令 ==== *)
 type instr =
@@ -83,6 +84,7 @@ let string_of_addr = function
   | R r -> string_of_reg r
   | L lbl -> lbl
   | RI (r, i) -> Printf.sprintf "[%s, #%d]" (string_of_reg r) i
+  | BIGI i -> "=" ^ string_of_int i
 
 let string_of_instr instr =
   let emit_instr op rands = op ^ "\t" ^ (String.concat ", " rands)

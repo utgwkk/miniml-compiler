@@ -138,7 +138,8 @@ let trans_decl (F.RecDecl (proc_name, params, body)) =
         (trans_cexp env loop_target cexp) @ [Label looplabel] @ (trans_exp newenv target exp)
     | F.RecurExp value ->
         let Proc(loop_label) = Environment.lookup "__loop__" env in
-        [Move (target, value_to_operand env value); Goto loop_label]
+        let Local(loop_var) = Environment.lookup "__loopvar__" env in
+        [Move (loop_var, value_to_operand env value); Goto loop_label]
   in
   let rec enumerate idx = function
       [] -> []

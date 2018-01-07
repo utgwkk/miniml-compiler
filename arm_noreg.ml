@@ -17,6 +17,10 @@ let param_to_reg = function
   | 1 -> A2
   | i -> err ("invalid parameter: " ^ string_of_int i)
 
+(* movのオペランドの即値として取りうる最大の絶対値 *)
+(* 自分のラズパイでは [-265, 2000] だった．とりあえず安全に200ぐらいとしておく *)
+let imm_max = 200
+
 (* Vm.operandから値を取得し，レジスタrdに格納するような
    stmt listを生成 *)
 let gen_operand rd = function
@@ -25,9 +29,13 @@ let gen_operand rd = function
       if rd = rs then [] else [Instr (Mov (rd, (R rs)))]
   | Vm.Local i -> [Instr (Ldr (rd, local_access i))]
   | Vm.Proc  lbl -> [Instr (Ldr (rd, L lbl))]
-  | Vm.IntV  i -> [Instr (Mov (rd, I i))]
+  | Vm.IntV  i ->
+      if abs i > imm_max then [Instr (Ldr (rd, BIGI i))]
+      else [Instr (Mov (rd, I i))]
 
 (* ==== 仮想マシンコード --> アセンブリコード ==== *)
+
+let fresh_label = Misc.fresh_id_maker "_"
 
 (* V.decl -> loc list *)
 let gen_decl (Vm.ProcDecl (name, nlocal, instrs)) =
@@ -67,8 +75,8 @@ let gen_decl (Vm.ProcDecl (name, nlocal, instrs)) =
     | Vm.Call (id, opf, [op1; op2]) ->
         let local_addr = local_access id in
         let header = [
-          Instr (Str (A1, RI (Sp, -4)));
-          Instr (Str (A2, RI (Sp, -8)));
+          Instr (Str (A1, RI (Sp, 0)));
+          Instr (Str (A2, RI (Sp, 4)));
         ] @
         (gen_operand A1 op1) @
         (gen_operand A2 op2) @
@@ -76,8 +84,8 @@ let gen_decl (Vm.ProcDecl (name, nlocal, instrs)) =
         let body = [
           Instr (Blx V1);
           Instr (Str (A1, local_addr));
-          Instr (Ldr (A1, RI (Sp, -4)));
-          Instr (Ldr (A2, RI (Sp, -8)));
+          Instr (Ldr (A1, RI (Sp, 0)));
+          Instr (Ldr (A2, RI (Sp, 4)));
         ]
         in header @ body
     | Vm.Call _ -> err "arienai call!!!!!!!!!!"
@@ -86,7 +94,7 @@ let gen_decl (Vm.ProcDecl (name, nlocal, instrs)) =
         let opnum = List.length ops in
         let header = [
           Instr (Str (A1, RI (Sp, 0)));
-          Instr (Str (A2, RI (Sp, -4)));
+          Instr (Str (A2, RI (Sp, 4)));
           Instr (Mov (A1, I opnum));
           Instr (Bl "mymalloc");
         ] in
@@ -98,8 +106,12 @@ let gen_decl (Vm.ProcDecl (name, nlocal, instrs)) =
           Instr (Mov (V2, R A1));
           Instr (Str (V2, local_addr));
           Instr (Ldr (A1, RI (Sp, 0)));
-          Instr (Ldr (A2, RI (Sp, -4)));
+          Instr (Ldr (A2, RI (Sp, 4)));
         ] in
+        (*
+         * mov v1, [fp, addr]
+         * str v1, [v2, idx, #4]
+         *)
         let footer = List.flatten @@ List.map (fun (idx, op) -> (gen_operand V1 op) @ [Instr (Str (V1, RI (V2, idx * 4)))]) @@ enumerate 0 ops
         in header @ body @ footer
     | Vm.Read (id, oper, index) ->
@@ -124,16 +136,16 @@ let gen_decl (Vm.ProcDecl (name, nlocal, instrs)) =
     Label name
   ] in
   let funcstart = [
-    Instr (Str (Fp, RI (Sp, 0)));
-    Instr (Str (Lr, RI (Sp, -4)));
+    Instr (Str (Fp, RI (Sp, -4)));
+    Instr (Str (Lr, RI (Sp, -8)));
     Instr (Sub (Fp, Sp, I 4));
-    Instr (Sub (Sp, Sp, I (4 * (nlocal))));
+    Instr (Sub (Sp, Sp, I (4 * (nlocal + 4))));
   ] in
   let footer = [
     Label (name ^ "_ret");
     Instr (Add (Sp, Fp, I 4));
-    Instr (Ldr (Lr, RI (Sp, -4)));
-    Instr (Ldr (Fp, RI (Sp, 0)));
+    Instr (Ldr (Lr, RI (Fp, -4)));
+    Instr (Ldr (Fp, RI (Fp, 0)));
     Instr (Bx Lr)
   ] in
   let body = List.flatten @@ List.map convert instrs in
