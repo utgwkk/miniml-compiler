@@ -130,6 +130,7 @@ let convert exp =
           let newexc = MySet.insert id exc in
           MySet.union (c_cexp exc ce1) (c_exp newexc e2)
       | N.LetRecExp (id, para, e1, e2) ->
+          print_endline id;
           let recexc = MySet.insert id exc in
           MySet.union (c_exp (MySet.insert para recexc) e1) (c_exp recexc e2)
       | N.LoopExp (id, ce1, e2) ->
@@ -147,44 +148,46 @@ let convert exp =
       in find' elem 0
     in
     let c_val = function
-      N.Var x -> N.Var x
-    | N.IntV i -> N.IntV i
+      Var x -> Var x
+    | IntV i -> IntV i
     in
     let rec c_cexp = function
-        N.ValExp v -> (
+        ValExp v -> (
           match v with
-            N.Var x -> (
+            Var x -> (
             match (find x freevars) with
-              Some idx -> N.ProjExp (N.Var f, idx + 1)
-            | None -> N.ValExp v
+              Some idx -> ProjExp (Var f, idx + 1)
+            | None -> ValExp v
           )
-          | _ -> N.ValExp v
+          | _ -> ValExp v
         )
-      | N.BinOp (op, v1, v2) -> N.BinOp (op, c_val v1, c_val v2)
-      | N.AppExp (v1, v2) -> N.AppExp (c_val v1, c_val v2)
-      | N.IfExp (v, e1, e2) -> N.IfExp (c_val v, c_exp e1, c_exp e2)
-      | N.TupleExp (v1, v2) -> N.TupleExp (c_val v1, c_val v2)
-      | N.ProjExp (v, i) -> N.ProjExp (c_val v, i)
+      | BinOp (op, v1, v2) -> BinOp (op, c_val v1, c_val v2)
+      | AppExp (v, vs) -> AppExp (c_val v, List.map c_val vs)
+      | IfExp (v, e1, e2) -> IfExp (c_val v, c_exp e1, c_exp e2)
+      | TupleExp vs -> TupleExp (List.map c_val vs)
+      | ProjExp (v, i) -> ProjExp (c_val v, i)
     and c_exp = function
-        N.CompExp ce -> N.CompExp (c_cexp ce)
-      | N.LetExp (x, ce, e) -> (
+        CompExp ce -> CompExp (c_cexp ce)
+      | LetExp (x, ce, e) -> (
         let newce = match ce with
-          N.ValExp (N.Var x) -> (
+          ValExp (Var x) -> (
             match (find x freevars) with
-              Some idx -> N.ProjExp (N.Var f, idx + 1)
-            | None -> N.ValExp (N.Var x)
+              Some idx -> ProjExp (Var f, idx + 1)
+            | ne -> ValExp (Var x)
           )
           | _ -> c_cexp ce
-        in N.LetExp (x, newce, c_exp e)
+        in LetExp (x, newce, c_exp e)
       )
-      | N.LetRecExp (f, x, e1, e2) -> N.LetRecExp (f, x, c_exp e1, c_exp e2)
-      | N.LoopExp (x, ce, e) -> N.LoopExp (x, c_cexp ce, c_exp e)
-      | N.RecurExp v -> N.RecurExp (c_val v)
+      | LetRecExp (f, x, e1, e2) -> LetRecExp (f, x, e1, e2)
+      | LoopExp (x, ce, e) -> LoopExp (x, c_cexp ce, c_exp e)
+      | RecurExp v -> RecurExp (c_val v)
     in c_exp exp
   in
   (* クロージャを作りうるものの集合 *)
+  (* id MySet.t ref *)
   let closure_funcs = ref MySet.empty in
   (* 変数名→関数ポインタの環境 *)
+  (* id Environment.t ref *)
   let funcptr_env = ref Environment.empty in
   (* letの右辺式がクロージャを作りうるかどうか
    * 1. 右辺式が関数ポインタである
@@ -195,36 +198,60 @@ let convert exp =
     | _ -> false
   in
   (* クロージャ変換の本体ここから *)
-  let closure_conv_value = function
-      N.Var x -> Var x
-    | N.IntV i -> IntV i
+  let closure_conv_value value k = match value with
+      N.Var x -> k (Var x)
+    | N.IntV i -> k (IntV i)
   in
-  let rec closure_conv_cexp = function
-      N.ValExp v -> ValExp (closure_conv_value v)
-    | N.BinOp (op, v1, v2) -> BinOp (op, closure_conv_value v1, closure_conv_value v2)
+  let rec closure_conv_cexp cexp k = match cexp with
+      N.ValExp v -> closure_conv_value v (fun newv -> k (ValExp newv))
+    | N.BinOp (op, v1, v2) ->
+        closure_conv_value v1 (fun newv1 ->
+          closure_conv_value v2 (fun newv2 ->
+            k (BinOp (op, newv1, newv2))
+          )
+        )
     | N.AppExp (N.Var x, v2) ->
         (* もとの関数はクロージャ表現になっているので，
          * そのかわりに関数ポインタを適用する *)
         let funcptr = try Environment.lookup x !funcptr_env with Environment.Not_bound -> x in
-        AppExp (Var funcptr, [Var x; closure_conv_value v2])
+        closure_conv_value v2 (fun newv2 ->
+          k (AppExp (Var funcptr, [Var x; newv2]))
+        )
     | N.AppExp (N.IntV _, _) -> err "cannot apply function to int"
-    | N.IfExp (v, e1, e2) -> IfExp (closure_conv_value v, closure_conv_exp e1, closure_conv_exp e2)
-    | N.TupleExp (v1, v2) -> TupleExp [closure_conv_value v1; closure_conv_value v2]
-    | N.ProjExp (v, i) -> ProjExp (closure_conv_value v, i - 1)
-  and closure_conv_exp = function
-      N.CompExp cexp -> CompExp (closure_conv_cexp cexp)
-    | N.LetExp (x, ce1, e2) ->
-        let newce1 = closure_conv_cexp ce1 in
-        if cexp_makes_closure ce1 then (
-          (* letの右辺式を正規化した結果が関数を指しているなら，
-           * letの束縛変数も関数を指しているものとする *)
-          closure_funcs := MySet.insert x !closure_funcs;
-          let funcname = fresh_id "cl_func" in
-          (* 変数名→関数ポインタの写像環境に x -> funcname を追加*)
-          funcptr_env := Environment.extend x funcname !funcptr_env;
-          LetExp (x, newce1, LetExp (funcname, ProjExp (Var x, 0), closure_conv_exp e2))
-        ) else
-          LetExp (x, newce1, closure_conv_exp e2)
+    | N.IfExp (v, e1, e2) ->
+        closure_conv_value v (fun newv ->
+          closure_conv_exp e1 (fun newe1 ->
+            closure_conv_exp e2 (fun newe2 ->
+              k (IfExp (newv, newe1, newe2))
+            )
+          )
+        )
+    | N.TupleExp (v1, v2) ->
+        closure_conv_value v1 (fun newv1 ->
+          closure_conv_value v2 (fun newv2 ->
+            k (TupleExp [newv1; newv2])
+          )
+        )
+    | N.ProjExp (v, i) ->
+        closure_conv_value v (fun newv ->
+          (* タプルからの射影を 0-index に揃える *)
+          k (ProjExp (newv, i - 1))
+        )
+  and closure_conv_exp exp k = match exp with
+      N.CompExp cexp -> closure_conv_cexp cexp (fun newcexp -> k (CompExp newcexp))
+    | N.LetExp (id, ce1, e2) ->
+        closure_conv_cexp ce1 (fun newce1 -> 
+          if cexp_makes_closure ce1 then (
+            (* letの右辺式を正規化した結果が関数を指しているなら，
+             * letの束縛変数も関数を指しているものとする *)
+            closure_funcs := MySet.insert id !closure_funcs;
+            let funcname = fresh_id "cl_func" in
+            (* 変数名→関数ポインタの写像環境に x -> funcname を追加*)
+            funcptr_env := Environment.extend id funcname !funcptr_env;
+            closure_conv_exp e2 (fun newe2 -> k (LetExp (id, newce1, LetExp (funcname, ProjExp (Var id, 0), newe2))))
+          ) else
+            closure_conv_exp e2 (fun newe2 -> k (LetExp (id, newce1, newe2)))
+        )
     | N.LetRecExp (f, x, e1, e2) ->
         let funcptr = fresh_id "funcptr" in
         closure_funcs := MySet.insert f !closure_funcs;
@@ -238,8 +265,16 @@ let convert exp =
          *   [e1/自由変数をクロージャ環境参照に変更する] in
          * let f = (<fresh_funptr>, (f内の自由変数の集合)...) in [e2]
          * *)
-        LetRecExp (funcptr, [f; x], closure_conv_exp (change_freevar_name freevars f e1),
-          LetExp (f, TupleExp freevar_vars, closure_conv_exp e2))
-    | N.LoopExp (x, ce1, e2) -> LoopExp (x, closure_conv_cexp ce1, closure_conv_exp e2)
-    | N.RecurExp v -> RecurExp (closure_conv_value v)
-  in closure_conv_exp exp
+        closure_conv_exp e1 (fun newe1 ->
+          closure_conv_exp e2 (fun newe2 ->
+            k (LetRecExp (funcptr, [f; x], change_freevar_name freevars f newe1, LetExp (f, TupleExp freevar_vars, newe2)))
+          )
+        )
+    | N.LoopExp (x, ce1, e2) ->
+        closure_conv_cexp ce1 (fun newce1 ->
+          closure_conv_exp e2 (fun newe2 ->
+            k (LoopExp (x, newce1, newe2))
+          )
+        )
+    | N.RecurExp v -> closure_conv_value v (fun newv -> k (RecurExp newv))
+  in closure_conv_exp exp (fun x -> x)
