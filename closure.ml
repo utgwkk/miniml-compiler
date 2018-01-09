@@ -130,7 +130,6 @@ let convert exp =
           let newexc = MySet.insert id exc in
           MySet.union (c_cexp exc ce1) (c_exp newexc e2)
       | N.LetRecExp (id, para, e1, e2) ->
-          print_endline id;
           let recexc = MySet.insert id exc in
           MySet.union (c_exp (MySet.insert para recexc) e1) (c_exp recexc e2)
       | N.LoopExp (id, ce1, e2) ->
@@ -140,48 +139,10 @@ let convert exp =
     in c_exp exc exp
   in
   (* 自由変数をクロージャの環境参照に変える *)
-  let change_freevar_name freevars f exp =
-    let find elem =
-      let rec find' elem idx = function
-          [] -> None
-        | h::t -> if h = elem then Some idx else find' elem (idx + 1) t
-      in find' elem 0
-    in
-    let c_val = function
-      Var x -> Var x
-    | IntV i -> IntV i
-    in
-    let rec c_cexp = function
-        ValExp v -> (
-          match v with
-            Var x -> (
-            match (find x freevars) with
-              Some idx -> ProjExp (Var f, idx + 1)
-            | None -> ValExp v
-          )
-          | _ -> ValExp v
-        )
-      | BinOp (op, v1, v2) -> BinOp (op, c_val v1, c_val v2)
-      | AppExp (v, vs) -> AppExp (c_val v, List.map c_val vs)
-      | IfExp (v, e1, e2) -> IfExp (c_val v, c_exp e1, c_exp e2)
-      | TupleExp vs -> TupleExp (List.map c_val vs)
-      | ProjExp (v, i) -> ProjExp (c_val v, i)
-    and c_exp = function
-        CompExp ce -> CompExp (c_cexp ce)
-      | LetExp (x, ce, e) -> (
-        let newce = match ce with
-          ValExp (Var x) -> (
-            match (find x freevars) with
-              Some idx -> ProjExp (Var f, idx + 1)
-            | ne -> ValExp (Var x)
-          )
-          | _ -> c_cexp ce
-        in LetExp (x, newce, c_exp e)
-      )
-      | LetRecExp (f, x, e1, e2) -> LetRecExp (f, x, e1, e2)
-      | LoopExp (x, ce, e) -> LoopExp (x, c_cexp ce, c_exp e)
-      | RecurExp v -> RecurExp (c_val v)
-    in c_exp exp
+  let rec change_freevar_name freevars f exp idx =
+    match freevars with
+      [] -> exp
+    | h::t -> LetExp (h, ProjExp (Var f, idx), change_freevar_name t f exp (idx + 1))
   in
   (* クロージャを作りうるものの集合 *)
   (* id MySet.t ref *)
@@ -256,8 +217,8 @@ let convert exp =
         let funcptr = fresh_id "funcptr" in
         closure_funcs := MySet.insert f !closure_funcs;
         (* 関数内の自由変数の集合を求める (関数ポインタも自由変数としておく) *)
-        let freevars = funcptr :: (MySet.to_list @@ collect_freevars (MySet.from_list [f; x]) e1) in
-        let freevar_vars = List.map (fun x -> Var x) freevars in
+        let freevars = (MySet.to_list @@ collect_freevars (MySet.from_list [f; x]) e1) in
+        let freevar_vars = List.map (fun x -> Var x) (funcptr::freevars) in
         (* <> : フレッシュな変数
          * [] : クロージャ変換
          * / : 代入などの操作
@@ -267,7 +228,7 @@ let convert exp =
          * *)
         closure_conv_exp e1 (fun newe1 ->
           closure_conv_exp e2 (fun newe2 ->
-            k (LetRecExp (funcptr, [f; x], change_freevar_name freevars f newe1, LetExp (f, TupleExp freevar_vars, newe2)))
+            k (LetRecExp (funcptr, [f; x], change_freevar_name freevars f newe1 1, LetExp (f, TupleExp freevar_vars, newe2)))
           )
         )
     | N.LoopExp (x, ce1, e2) ->
