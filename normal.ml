@@ -170,8 +170,10 @@ and normalize e =
           )
         )
     | S.ProjExp (e, i) ->
+        (* make i 0-index *)
+        if not (i = 1 || i = 2) then err "projection index must be 1 or 2.";
         let projvar = fresh_id "proj" in
-        convert_I env e (fun x -> k (S.LetExp (projvar, x, S.ProjExp (S.Var projvar, i))))
+        convert_I env e (fun x -> k (S.LetExp (projvar, x, S.ProjExp (S.Var projvar, i - 1))))
   in
   (* 言語C -> 正規形への変換 *)
   let rec convert_N exp =

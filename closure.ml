@@ -195,8 +195,7 @@ let convert exp =
         )
     | N.ProjExp (v, i) ->
         closure_conv_value v (fun newv ->
-          (* タプルからの射影を 0-index に揃える *)
-          k (ProjExp (newv, i - 1))
+          k (ProjExp (newv, i))
         )
   and closure_conv_exp exp k = match exp with
       N.CompExp cexp -> closure_conv_cexp cexp (fun newcexp -> k (CompExp newcexp))
