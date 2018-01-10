@@ -176,7 +176,7 @@ and normalize e =
         convert_I env e (fun x -> k (S.LetExp (projvar, x, S.ProjExp (S.Var projvar, i - 1))))
   in
   (* 言語C -> 正規形への変換 *)
-  let rec convert_N exp =
+  let rec convert_N exp k =
     (* let x = e1 in e2 / loop x = e1 in e2 の e1 中のletを外に出す *)
     let rec unnest_let exp =
       match exp with
@@ -202,29 +202,46 @@ and normalize e =
     in
     let unnested_exp = unnest_let exp in
     match unnested_exp with
-      S.Var x -> CompExp (ValExp (Var x))
-    | S.ILit i -> CompExp (ValExp (IntV i))
+      S.Var x -> k (CompExp (ValExp (Var x)))
+    | S.ILit i -> k (CompExp (ValExp (IntV i)))
     | S.BLit _ -> err "boolean should be converted to integer on convert_I"
-    | S.BinOp (op, v1, v2) -> CompExp (BinOp (op, value v1, value v2))
-    | S.IfExp (e1, e2, e3) -> CompExp (IfExp (value e1, e2 |> convert_N, e3 |> convert_N))
+    | S.BinOp (op, v1, v2) -> k (CompExp (BinOp (op, value v1, value v2)))
+    | S.IfExp (e1, e2, e3) ->
+        convert_N e2 (fun e2' ->
+          convert_N e3 (fun e3' ->
+            k (CompExp (IfExp (value e1, e2', e3')))
+          )
+        )
     | S.LetExp (x, e1, e2) -> (
-        match (convert_N e1) with
-          CompExp ce -> LetExp (x, ce, e2 |> convert_N)
-        | _ -> err "cannot uncomp"
+        convert_N e1 (fun e1' ->
+          match e1' with
+            CompExp ce -> convert_N e2 (fun e2' -> k (LetExp (x, ce, e2')))
+          | _ -> err "cannot uncomp"
+        )
     )
     | S.FunExp _ -> err "funexp should be converted to letrecexp on convert_I"
-    | S.AppExp (e1, e2) -> CompExp (AppExp (value e1, value e2))
-    | S.LetRecExp (f, x, e1, e2) -> LetRecExp (f, x, e1 |> convert_N, e2 |> convert_N)
+    | S.AppExp (e1, e2) -> k (CompExp (AppExp (value e1, value e2)))
+    | S.LetRecExp (f, x, e1, e2) ->
+        convert_N e1 (fun e1' ->
+          convert_N e2 (fun e2' ->
+            k (LetRecExp (f, x, e1', e2'))
+          )
+        )
     | S.LoopExp (x, e1, e2) -> (
-        match (convert_N e1) with
-          CompExp ce -> LoopExp (x, ce, e2 |> convert_N)
-        | _ -> err "cannot uncomp"
+        convert_N e1 (fun e1' ->
+          match e1' with
+            CompExp ce -> convert_N e2 (fun e2' -> k (LoopExp (x, ce, e2')))
+          | _ -> err "cannot uncomp"
+        )
     )
-    | S.RecurExp e -> RecurExp (value e)
-    | S.TupleExp (e1, e2) -> CompExp (TupleExp (value e1, value e2))
-    | S.ProjExp (e, i) -> CompExp (ProjExp (value e, i))
+    | S.RecurExp e -> k (RecurExp (value e))
+    | S.TupleExp (e1, e2) -> k (CompExp (TupleExp (value e1, value e2)))
+    | S.ProjExp (e, i) -> k (CompExp (ProjExp (value e, i)))
   in
-  convert_I (Environment.empty) e convert_N
+  let (>>=) f g = f (fun x -> g x) in
+  convert_I (Environment.empty) e
+  >>= convert_N
+  >>= (fun x -> x)
 
 
 (* ==== recur式が末尾位置にのみ書かれていることを検査 ==== *)
