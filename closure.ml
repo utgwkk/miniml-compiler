@@ -157,9 +157,6 @@ let apply_cl =
         let funcptrname = fresh_id "fp" in
         LetExp (funcptrname, ProjExp (Var f, 0), CompExp (AppExp (Var funcptrname, (Var f)::vs)))
     | CompExp ce -> CompExp (acl_cexp ce)
-    | LetExp (id, ce, CompExp (AppExp (Var f, vs))) ->
-        let funcptrname = fresh_id "fp" in
-        LetExp (id, acl_cexp ce, LetExp (funcptrname, ProjExp (Var f, 0), CompExp (AppExp (Var funcptrname, (Var f)::vs))))
     | LetExp (id, AppExp (Var f, vs), e) ->
         let funcptrname = fresh_id "fp" in
         LetExp (funcptrname, ProjExp (Var f, 0), LetExp (id, AppExp (Var funcptrname, (Var f)::vs), acl_exp e))
