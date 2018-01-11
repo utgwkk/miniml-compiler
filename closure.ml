@@ -139,9 +139,11 @@ let collect_freevars exc exp =
  * let fv1 = f.1 in
  * let fv2 = f.2 in ... exp
  *)
-let rec assign_freevars f exp idx = function
+let assign_freevars f exp fvs =
+  let rec assign_freevars idx = function
     [] -> exp
-  | h::rest -> LetExp (h, ProjExp (Var f, idx), assign_freevars f exp idx rest)
+  | h::rest -> LetExp (h, ProjExp (Var f, idx), assign_freevars (idx + 1) rest)
+  in assign_freevars 1 fvs
 
 (* cl_exp だけでは関数ポインタが用いられていないので，
  * 関数適用に対して関数ポインタを用いるように正規形の木構造を修正する．
@@ -212,7 +214,7 @@ let convert exp =
         let fvs = MySet.to_list freevars_set in
         cl_exp e1 (fun e1' ->
           cl_exp e2 (fun e2' ->
-            k (LetRecExp (newfuncname, [f; x], assign_freevars f e1' 1 fvs,
+            k (LetRecExp (newfuncname, [f; x], assign_freevars f e1' fvs,
                 LetExp (f, TupleExp (List.map (fun x -> Var x) @@ newfuncname::fvs), e2'))
             )
           )
