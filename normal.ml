@@ -91,6 +91,76 @@ let string_of_norm e =
 
 
 (* ==== 正規形への変換 ==== *)
+let is_value = function
+    S.Var _ -> true
+  | S.ILit _ -> true
+  | S.BLit _ -> true
+  | _ -> false
+
+(* コピー伝播を行う *)
+let rec copy_prop map exp k = match exp with
+    S.Var x -> (
+      match MyMap.get x map with
+        Some v -> k v
+      | None -> k (S.Var x)
+    )
+  | S.BinOp (op, e1, e2) ->
+      copy_prop map e1 (fun e1' ->
+        copy_prop map e2 (fun e2' ->
+          k (S.BinOp (op, e1', e2'))
+        )
+      )
+  | S.IfExp (e1, e2, e3) ->
+      copy_prop map e1 (fun e1' ->
+        copy_prop map e2 (fun e2' ->
+          copy_prop map e3 (fun e3' ->
+            k (S.IfExp (e1', e2', e3'))
+          )
+        )
+      )
+  | S.LetExp (id, e1, e2) ->
+      copy_prop map e1 (fun e1' ->
+        if is_value e1' then
+          let newmap = MyMap.assoc id e1' map in
+          copy_prop newmap e2 (fun e2' -> k e2')
+        else 
+          copy_prop map e2 (fun e2' ->
+            k (S.LetExp (id, e1', e2'))
+          )
+      )
+  | S.AppExp (e1, e2) ->
+      copy_prop map e1 (fun e1' ->
+        copy_prop map e2 (fun e2' ->
+          k (S.AppExp (e1', e2'))
+        )
+      )
+  | S.LetRecExp (id, para, e1, e2) ->
+      copy_prop map e1 (fun e1' ->
+        copy_prop map e2 (fun e2' ->
+          k (S.LetRecExp (id, para, e1', e2'))
+        )
+      )
+  | S.LoopExp (id, e1, e2) ->
+      copy_prop map e1 (fun e1' ->
+        copy_prop map e2 (fun e2' ->
+          k (S.LoopExp (id, e1', e2'))
+        )
+      )
+  | S.RecurExp e ->
+    copy_prop map e (fun e' ->
+      k (S.RecurExp e')
+    )
+  | S.TupleExp (e1, e2) ->
+      copy_prop map e1 (fun e1' ->
+        copy_prop map e2 (fun e2' ->
+          k (S.TupleExp (e1', e2'))
+        )
+      )
+  | S.ProjExp (e, i) ->
+    copy_prop map e (fun e' ->
+      k (S.ProjExp (e', i))
+    )
+  | e -> k e
 
 and normalize e =
   (* MiniML -> 言語Cへの変換I (継続渡しスタイル) *)
@@ -240,6 +310,7 @@ and normalize e =
   in
   let (>>=) f g = f (fun x -> g x) in
   convert_I (Environment.empty) e
+  >>= copy_prop MyMap.empty
   >>= convert_N
   >>= (fun x -> x)
 
