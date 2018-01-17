@@ -20,9 +20,9 @@ lexer.cmx : parser.cmx
 live.cmo : vm.cmo mySet.cmi dfa.cmo cfg.cmo
 live.cmx : vm.cmx mySet.cmx dfa.cmx cfg.cmx
 main.cmo : vm.cmo reg.cmo parser.cmi opt.cmo normal.cmo lexer.cmo flat.cmo \
-    closure.cmo arm_spec.cmo arm_reg.cmo arm_noreg.cmo
+    closure.cmo arm_spec.cmo arm_reg.cmo arm_noreg.cmo c99.cmo
 main.cmx : vm.cmx reg.cmx parser.cmx opt.cmx normal.cmx lexer.cmx flat.cmx \
-    closure.cmx arm_spec.cmx arm_reg.cmx arm_noreg.cmx
+    closure.cmx arm_spec.cmx arm_reg.cmx arm_noreg.cmx c99.cmx
 misc.cmo :
 misc.cmx :
 myMap.cmo : mySet.cmi myMap.cmi
@@ -47,3 +47,5 @@ syntax.cmo :
 syntax.cmx :
 vm.cmo : syntax.cmo flat.cmo
 vm.cmx : syntax.cmx flat.cmx
+c99.cmo : syntax.cmo flat.cmo
+c99.cmx : syntax.cmx flat.cmx

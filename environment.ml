@@ -5,6 +5,8 @@ exception Not_bound
 let empty = []
 let extend x v env = (x, v)::env
 
+let to_list env = env
+
 let rec lookup x env =
   try List.assoc x env with Not_found -> raise Not_bound
 

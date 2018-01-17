@@ -1,6 +1,7 @@
 let debug = ref false
 let dprint s = if !debug then (print_string (s ()) ; flush stdout)
 
+let c99 = ref false
 let display_cfg = ref false
 let optimize = ref false
 
@@ -35,24 +36,32 @@ let rec compile prompt ichan cont =
   (* 制御フローグラフを表示 *)
   if !display_cfg && not !optimize then
     Cfg.display_cfg (Cfg.build vmcode) None;
-
-  let armcode =
-    if !optimize then
-      (* Low-level opt. (7章 DFA & 最適化) *)
-
-      let regcode = Opt.optimize !display_cfg Arm_spec.nreg vmcode in
-      dprint (fun () ->
-          "(* [Reg code] *)\n" ^ (Reg.string_of_reg regcode) ^ "\n");
-      (* Convert to ARM assembly (7章 コード生成(レジスタ利用版)) *)
-      Arm_reg.codegen regcode
+  
+  let output =
+    if !c99 then
+      (* C言語コードへのコンパイル *)
+      let ccode = C99.compile flat in
+      C99.string_of_code ccode
     else
-      (* Convert to ARM assembly (6章 コード生成) *)
-      Arm_noreg.codegen vmcode
+    let armcode =
+      if !optimize then
+        (* Low-level opt. (7章 DFA & 最適化) *)
+
+        let regcode = Opt.optimize !display_cfg Arm_spec.nreg vmcode in
+        dprint (fun () ->
+            "(* [Reg code] *)\n" ^ (Reg.string_of_reg regcode) ^ "\n");
+        (* Convert to ARM assembly (7章 コード生成(レジスタ利用版)) *)
+        Arm_reg.codegen regcode
+      else
+        (* Convert to ARM assembly (6章 コード生成) *)
+        Arm_noreg.codegen vmcode
+    in
+    Arm_spec.string_of armcode ^ "\n"
   in
 
   (* Output to stdout/file *)
   let ochan = if !outfile = "-" then stdout else open_out !outfile in
-  let () = output_string ochan (Arm_spec.string_of armcode ^ "\n") in
+  let () = output_string ochan output in
   if !outfile <> "-" then close_out ochan;
 
   (* continued... *)
@@ -63,7 +72,7 @@ let rec compile prompt ichan cont =
 
 let srcfile = ref "-"
 
-let usage = "Usage: " ^ Sys.argv.(0) ^ " [-vOG] [-o ofile] [file]"
+let usage = "Usage: " ^ Sys.argv.(0) ^ " [-vOGC] [-o ofile] [file]"
 
 let aspec = Arg.align [
     ("-o", Arg.Set_string outfile,
@@ -72,6 +81,8 @@ let aspec = Arg.align [
      " Perform optimization (default: " ^ (string_of_bool !optimize) ^ ")");
     ("-G", Arg.Unit (fun () -> display_cfg := true),
      " Display CFG (default: " ^ (string_of_bool !display_cfg) ^ ")");
+    ("-C", Arg.Unit (fun () -> c99 := true),
+     " Compile to C code instead of ARM assembly (default: " ^ (string_of_bool !c99) ^ ")");
     ("-v", Arg.Unit (fun () -> debug := true),
      " Print debug info (default: " ^ (string_of_bool !debug) ^ ")");
   ]
