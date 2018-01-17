@@ -251,7 +251,7 @@ let recur_check e =
   | S.LoopExp (_, e1, e2) ->
       check e1 false;
       check e2 true;
-  | S.RecurExp _ -> if ok then () else err "recur check failed"
+  | S.RecurExp e -> if ok then check e false else err "recur check failed"
   | S.TupleExp (e1, e2) ->
       check e1 false;
       check e2 false;
