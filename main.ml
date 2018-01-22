@@ -2,6 +2,7 @@ let debug = ref false
 let dprint s = if !debug then (print_string (s ()) ; flush stdout)
 
 let c99 = ref false
+let mips = ref false
 let display_cfg = ref false
 let optimize = ref false
 
@@ -42,6 +43,9 @@ let rec compile prompt ichan cont =
       (* C言語コードへのコンパイル *)
       let ccode = C99.compile flat in
       C99.string_of_code ccode
+    else if !mips then
+      let mipscode = Mips_noreg.codegen vmcode
+      in Mips_spec.string_of mipscode ^ "\n"
     else
     let armcode =
       if !optimize then
@@ -83,6 +87,8 @@ let aspec = Arg.align [
      " Display CFG (default: " ^ (string_of_bool !display_cfg) ^ ")");
     ("-C", Arg.Unit (fun () -> c99 := true),
      " Compile to C code instead of ARM assembly (default: " ^ (string_of_bool !c99) ^ ")");
+    ("-M", Arg.Unit (fun () -> mips := true),
+     " Compile to mips assembly instead of ARM assembly (default: " ^ (string_of_bool !mips) ^ ")");
     ("-v", Arg.Unit (fun () -> debug := true),
      " Print debug info (default: " ^ (string_of_bool !debug) ^ ")");
   ]
