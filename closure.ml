@@ -171,6 +171,7 @@ let apply_cl =
     | LoopExp (id, AppExp (Var f, vs), e) ->
         let funcptrname = fresh_id "fp" in
         LetExp (funcptrname, ProjExp (Var f, 0), LoopExp (id, AppExp (Var funcptrname, (Var f)::vs), acl_exp e))
+    | LoopExp (id, ce, e) -> LoopExp (id, acl_cexp ce, acl_exp e)
     | e -> e
   in acl_exp
 
