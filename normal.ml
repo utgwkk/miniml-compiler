@@ -254,6 +254,8 @@ and normalize e =
           match e1 with
             S.LetExp (ix, ie1, ie2) -> unnest_let @@ S.LetExp (ix, ie1, unnest_let @@ S.LetExp (x, ie2, e2))
           | S.LetRecExp (ifun, ix, ie1, ie2) -> S.LetRecExp (ifun, ix, unnest_let ie1, unnest_let @@ S.LetExp (x, ie2, e2))
+          | S.LoopExp (ix, ie1, ie2) ->
+            unnest_let @@ S.LetExp (x, S.IfExp (S.ILit 1, S.LoopExp (ix, ie1, ie2), S.ILit 42), e2)
           | _ -> S.LetExp (x, e1, unnest_let e2)
       )
       | S.LetRecExp (f, x, e1, e2) -> S.LetRecExp (f, x, e1, unnest_let e2)
