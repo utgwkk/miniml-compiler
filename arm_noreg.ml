@@ -50,16 +50,10 @@ let gen_decl (Vm.ProcDecl (name, nlocal, instrs)) =
             S.Plus -> [Instr (Add (V1, V1, R V2))]
           | S.Mult -> [Instr (Mul (V1, V1, R V2))]
           | S.Lt ->
-              let label_ok = fresh_label "lt_ok" in
-              let label_end = fresh_label "lt_end" in
               [
                 Instr (Cmp (V1, R V2));
-                Instr (Blt label_ok);
-                Instr (Mov (V1, I 0));
-                Instr (B label_end);
-                Label label_ok;
-                Instr (Mov (V1, I 1));
-                Label label_end;
+                Instr (Movlt (V1, I 1));
+                Instr (Movge (V1, I 0));
               ]
         ) in
         let footer = [Instr (Str (V1, local_addr))] in

@@ -45,6 +45,8 @@ type instr =
   | Cmp  of reg * addr
   | Ldr  of reg * addr
   | Mov  of reg * addr (* レジスタ同士にも即値ロードにも *)
+  | Movlt of reg * addr
+  | Movge of reg * addr
   | Mul  of reg * reg * addr
   | Str  of reg * addr
   | Sub  of reg * reg * addr
@@ -108,6 +110,10 @@ let string_of_instr instr =
       emit_instr "ldr" [string_of_reg r; str_of_addr]
   | Mov (r, a) ->
       emit_instr "mov" [string_of_reg r; string_of_addr a]
+  | Movlt (r, a) ->
+      emit_instr "movlt" [string_of_reg r; string_of_addr a]
+  | Movge (r, a) ->
+      emit_instr "movge" [string_of_reg r; string_of_addr a]
   | Mul (r1, r2, a) ->
       emit_instr "mul" [string_of_reg r1; string_of_reg r2;
                         string_of_addr a]
