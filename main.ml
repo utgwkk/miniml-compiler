@@ -41,7 +41,7 @@ let rec compile prompt ichan cont =
   let output =
     if !c99 then
       (* C言語コードへのコンパイル *)
-      let ccode = C99.compile flat in
+      let ccode = C99.compile vmcode in
       C99.string_of_code ccode
     else if !mips then
       let mipscode = Mips_noreg.codegen vmcode

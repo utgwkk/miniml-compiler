@@ -4,8 +4,8 @@ arm_reg.cmo : syntax.cmo reg.cmo arm_spec.cmo
 arm_reg.cmx : syntax.cmx reg.cmx arm_spec.cmx
 arm_spec.cmo :
 arm_spec.cmx :
-c99.cmo : syntax.cmo flat.cmo environment.cmi
-c99.cmx : syntax.cmx flat.cmx environment.cmx
+c99.cmo : syntax.cmo vm.cmo
+c99.cmx : syntax.cmx vm.cmx
 cfg.cmo : vm.cmo mySet.cmi
 cfg.cmx : vm.cmx mySet.cmx
 closure.cmo : syntax.cmo pretty.cmi normal.cmo mySet.cmi

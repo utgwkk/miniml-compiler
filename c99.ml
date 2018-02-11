@@ -1,98 +1,86 @@
 module S = Syntax
-module F = Flat
 
 exception Error of string
 
 let err s = raise (Error s)
 
-type id = F.id
+type id = Vm.id
+type label = Vm.label
 
-type value =
-  IntV of int
-| Var of id
-| Fun of id
+type operand =
+| Param of int
+| Local of id
+| Proc of label
+| IntV of int
 
-type exp =
-  Value of value
-| BinOp of S.binOp * value * value
-| Apply of value * value list
-| If of value * stmt list * stmt list
-| Malloc of value list
-| Read of value * int
-
-and stmt =
-  Assign of id * exp
+type stmt =
 | VarDecl of id
-| VarAssign of id * exp
-| Expr of exp
-| Loop of stmt list
-| Recur of id * exp
-| Return of exp
+| Move of id * operand (* local(ofs) <- op *)
+| BinOp of id * S.binOp * operand * operand
+  (* local(ofs) <- bop(op_1, op_2) *)
+| Label of label (* l: *)
+| BranchIf of operand * label (* if op then goto l *)
+| Goto of label (* goto l *)
+| Call of id * operand * operand list
+  (* local(ofs) <- call op_f(op_1, ..., op_n) *)
+| Return of operand (* return(op) *)
+| Malloc of id * operand list (* new ofs [op_1, ..., op_n] *)
+| Read of id * operand * int (* read ofs #i(op) *)
 
-type decl = Decl of id * id list * stmt list
+type decl = Decl of label * stmt list
 
 type code = decl list
 
-let string_of_value = function
-  IntV i -> "(_t){" ^ (string_of_int i) ^ "}"
-| Var x -> x
-| Fun f -> f
+let string_of_param p = "p" ^ string_of_int p
+let string_of_local t = "t" ^ string_of_int t
+
+let string_of_operand = function
+| Param p -> string_of_param p
+| Local t -> string_of_local t
+| Proc l -> "(_t){.func = " ^ l ^ "}"
+| IntV i -> "(_t){" ^ (string_of_int i) ^ "}"
 
 let string_of_intvar = function
   IntV i -> string_of_int i
-| Var x -> x ^ ".value"
-| Fun f -> err "function should not be a integer value"
+| Param p -> string_of_param p ^ ".value"
+| Local t -> string_of_local t ^ ".value"
+| Proc f -> err "function should not be a integer value"
 
 let rec enumerate idx = function
     [] -> []
   | h::t -> (idx, h)::(enumerate (idx + 1) t)
 
-let rec string_of_exp nest =
-  let indent = String.make (nest * 2) ' ' in
-  function
-  Value v -> string_of_value v
-| BinOp (op, lhs, rhs) -> "(_t){" ^ (string_of_intvar lhs) ^ " " ^ (S.string_of_op op) ^ " " ^ (string_of_intvar rhs) ^ "}"
-| Apply (lhs, args) -> (string_of_value lhs) ^ ".func(" ^ (String.concat ", " @@ List.map string_of_value args) ^ ")"
-| If (v, s1, s2) ->
-    let stmt_true = String.concat "\n" @@ List.map (string_of_stmt (nest + 1)) s1 in
-    let stmt_false = String.concat "\n" @@ List.map (string_of_stmt (nest + 1)) s2 in
-    "if (" ^ (string_of_intvar v) ^ ") {\n" ^ stmt_true ^ "\n" ^ indent ^ "} else {\n" ^ stmt_false ^ indent ^ "\n" ^ indent ^ "}"
-| Malloc _ -> err "must not malloc on string_of_exp"
-| Read (v, idx) -> (string_of_value v) ^ ".tuple[" ^ (string_of_int idx) ^ "]"
+let string_of_stmt = function
+| VarDecl id -> "  _t " ^ string_of_local id ^ ";"
+| Move (id, oper) -> "  " ^ string_of_local id ^ " = " ^ string_of_operand oper ^ ";"
+| BinOp (id, op, lhs, rhs) ->
+    "  " ^ string_of_local id ^ " = (_t){" ^ string_of_intvar lhs ^ " " ^ S.string_of_op op ^ " " ^ string_of_intvar rhs ^ "};"
+| Label l -> l ^ ":;"
+| BranchIf (oper, l) -> "  if (" ^ string_of_intvar oper ^ ") goto " ^ l ^ ";"
+| Goto l -> "  goto " ^ l ^ ";"
+| Call (id, oper, args) ->
+    let str_of_args = String.concat ", " (List.map string_of_operand args) in
+    "  " ^ string_of_local id ^ " = " ^ string_of_operand oper ^ ".func(" ^ str_of_args ^ ");"
+| Return oper -> "  return " ^ string_of_operand oper ^ ";"
+| Malloc (id, ops) ->
+    let size = List.length ops in
+    let str_of_assigns =
+      snd @@
+      List.fold_left
+      (fun (idx, buf) op ->
+        (idx + 1, buf ^ "  " ^ string_of_local id ^ ".tuple[" ^ string_of_int idx ^ "] = " ^ string_of_operand op ^ ";\n")
+      )
+      (0, "") ops in
+    "  " ^ string_of_local id ^ ".tuple = malloc(" ^ string_of_int size ^ " * sizeof(_t));\n" ^
+    "  if (" ^ string_of_local id ^ ".tuple == NULL) exit(EXIT_FAILURE);\n" ^
+    str_of_assigns
+| Read (id, oper, ofs) ->
+    "  " ^ string_of_local id ^ " = " ^ string_of_operand oper ^ ".tuple[" ^ string_of_int ofs ^ "];"
 
-and string_of_stmt nest =
-  let indent = String.make (nest * 2) ' ' in
-  function
-    Assign (id, rhs) -> (
-      match rhs with 
-        Malloc vs ->
-          let size = List.length vs in
-          let vs_idx = enumerate 0 vs in
-          let malloc_strs =
-            List.map
-            (fun (idx, v) ->
-              match v with
-                Fun f -> indent ^ id ^ ".tuple[" ^ (string_of_int idx) ^ "].func = " ^ (string_of_value v) ^ ";"
-              | _ -> indent ^ id ^ ".tuple[" ^ (string_of_int idx) ^ "] = " ^ (string_of_value v) ^ ";"
-            )
-            vs_idx in
-          indent ^ "_t " ^ id ^ ";\n" ^ indent ^ id ^ ".tuple = malloc(" ^ string_of_int size ^ " * sizeof(_t));" ^ "\n" ^ (String.concat "\n" malloc_strs)
-      | _ -> indent ^ "const _t " ^ id ^ " = " ^ (string_of_exp nest rhs) ^ ";"
-    )
-  | VarDecl id -> indent ^ "_t " ^ id ^ ";"
-  | VarAssign (id, exp) -> indent ^ id ^ " = " ^ (string_of_exp nest exp) ^ ";"
-  | Expr exp -> indent ^ (string_of_exp nest exp) ^ ";"
-  | Return exp -> indent ^ "return " ^ (string_of_exp nest exp) ^ ";"
-  | Loop stmts ->
-    let stmt_s = String.concat "\n" @@ List.map (string_of_stmt (nest + 1)) stmts in
-    indent ^ "while (1){\n" ^ stmt_s ^ "\n" ^ indent ^ "}"
-  | Recur (id, exp) ->
-    indent ^ id ^ " = " ^ (string_of_exp nest exp) ^ ";\n" ^ indent ^ "continue;"
-
-let string_of_decl (Decl (func, params, stmts)) =
-  let stmts_s = List.map (string_of_stmt 1) stmts in
-  let funchead = "_t " ^ func ^ "(" ^ (String.concat ", " @@ List.map (fun x -> "_t " ^ x) params) ^ ") {" in
-  (String.concat "\n" (funchead::stmts_s)) ^ "\n}\n"
+let string_of_decl (Decl (func, stmts)) =
+  let str_of_stmts = List.map string_of_stmt stmts in
+  let funchead = "_t " ^ func ^ "(_t p0, _t p1) {" in
+  (String.concat "\n" (funchead::str_of_stmts)) ^ "\n}\n"
 
 let c_header =
   "#include <stdio.h>\n" ^
@@ -112,58 +100,38 @@ let c_main =
   "}\n"
 
 let string_of_code code =
-  let prototypes = List.map (fun (Decl (name, _, _)) -> "_t " ^ name ^ "(_t, _t);") code in
+  let prototypes = List.map (fun (Decl (name, _)) -> "_t " ^ name ^ "(_t, _t);") code in
   let decls = List.rev_append (List.rev_map string_of_decl code) [c_main] in
   String.concat "\n" (c_header::c_union::prototypes@""::decls)
 
-(* 文をたどって return <exp> を <var> = <exp> に変更する *)
-let ret_to_varassign var =
-  let rec r_exp = function
-    If (v, s1, s2) -> If (v, List.map r_stmt s1, List.map r_stmt s2)
-  | e -> e
-  and r_stmt = function
-    Return exp -> VarAssign (var, exp)
-  | Expr e -> Expr (r_exp e)
-  | Loop stmts -> Loop (List.map r_stmt stmts)
-  | s -> s
-  in r_stmt
+let trans_oper = function
+| Vm.Param p -> Param p
+| Vm.Local t -> Local t
+| Vm.Proc f -> Proc f
+| Vm.IntV i -> IntV i
 
-let trans_body =
-  let t_val = function
-    F.Var x -> Var x
-  | F.Fun f -> Fun f
-  | F.IntV i -> IntV i
-  in
-  let rec t_cexp env = function
-    F.ValExp value -> Value (t_val value)
-  | F.BinOp (op, lhs, rhs) -> BinOp (op, t_val lhs, t_val rhs)
-  | F.AppExp (v1, vs) -> Apply (t_val v1, List.map t_val vs)
-  | F.IfExp (v, e1, e2) -> If (t_val v, t_exp env e1, t_exp env e2)
-  | F.TupleExp vs -> Malloc (List.map t_val vs)
-  | F.ProjExp (v, idx) -> Read (t_val v, idx)
-  and t_exp env = function
-    F.CompExp (F.IfExp (v, e1, e2)) -> [Expr (t_cexp env (F.IfExp (v, e1, e2)))]
-  | F.CompExp cexp -> [Return (t_cexp env cexp)]
-  | F.LetExp (id, F.IfExp (v, e1, e2), exp) ->
-      let ifexp = ret_to_varassign id @@ Expr (t_cexp env (F.IfExp (v, e1, e2))) in
-      (VarDecl id)::ifexp::(t_exp env exp)
-  | F.LetExp (id, cexp, exp) ->
-      let rhs = t_cexp env cexp in
-      (Assign (id, rhs))::(t_exp env exp)
-  | F.LoopExp (id, F.IfExp (v, e1, e2), exp) ->
-      let newenv = Environment.extend "__loop__" id env in
-      let ifexp = ret_to_varassign id @@ Expr (t_cexp env (F.IfExp (v, e1, e2))) in
-      (VarDecl id)::ifexp::[Loop (t_exp newenv exp)]
-  | F.LoopExp (id, cexp, exp) ->
-      let newenv = Environment.extend "__loop__" id env in
-      [VarDecl id; VarAssign (id, t_cexp env cexp); Loop (t_exp newenv exp)]
-  | F.RecurExp v ->
-      let loopvar = Environment.lookup "__loop__" env in
-      [Recur (loopvar, Value (t_val v))]
-  in t_exp Environment.empty
+let trans_body = function
+| Vm.Move (id, oper) -> Move (id, trans_oper oper)
+| Vm.BinOp (id, op, lhs, rhs) -> BinOp (id, op, trans_oper lhs, trans_oper rhs)
+| Vm.Label l -> Label l
+| Vm.BranchIf (oper, l) -> BranchIf (trans_oper oper, l)
+| Vm.Goto l -> Goto l
+| Vm.Call (id, oper, args) -> Call (id, trans_oper oper, List.map trans_oper args)
+| Vm.Return oper -> Return (trans_oper oper)
+| Vm.Malloc (id, args) -> Malloc (id, List.map trans_oper args)
+| Vm.Read (id, oper, ofs) -> Read (id, trans_oper oper, ofs)
+| Vm.BEGIN _ -> err "BEGIN"
+| Vm.END _ -> err "END"
 
-let trans_decl (F.RecDecl (proc_name, params, body)) =
+let trans_decl (Vm.ProcDecl (proc_name, nlocals, body)) =
   (* Decl (proc_name, params, [Return (Value (IntV 1))]) *)
-  Decl (proc_name, params, trans_body body)
+  let transed_body = List.map trans_body body in
+  let complete_body =
+    let rec gen_vardecls n =
+      if n < 0 then []
+      else VarDecl n :: gen_vardecls (n - 1)
+    in
+    (gen_vardecls nlocals) @ transed_body in
+  Decl (proc_name, complete_body)
 
 let compile = List.map trans_decl
