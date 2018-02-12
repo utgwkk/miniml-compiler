@@ -73,6 +73,7 @@ let string_of_stmt = function
       (0, "") ops in
     "  " ^ string_of_local id ^ ".tuple = malloc(" ^ string_of_int size ^ " * sizeof(_t));\n" ^
     "  if (" ^ string_of_local id ^ ".tuple == NULL) exit(EXIT_FAILURE);\n" ^
+    "  on_exit(cleanup, " ^ string_of_local id ^ ".tuple);\n" ^
     str_of_assigns
 | Read (id, oper, ofs) ->
     "  " ^ string_of_local id ^ " = " ^ string_of_operand oper ^ ".tuple[" ^ string_of_int ofs ^ "];"
@@ -93,6 +94,12 @@ let c_union =
   "  union MLType *tuple;\n" ^
   "} _t;\n"
 
+let c_cleanup =
+"void cleanup (int status, void *tuple) {
+  free(tuple);
+}
+"
+
 let c_main =
   "int main (void) {\n" ^
   "  printf(\"%d\\n\", _toplevel((_t){0}, (_t){0}).value);\n" ^
@@ -102,7 +109,7 @@ let c_main =
 let string_of_code code =
   let prototypes = List.map (fun (Decl (name, _)) -> "_t " ^ name ^ "(_t, _t);") code in
   let decls = List.rev_append (List.rev_map string_of_decl code) [c_main] in
-  String.concat "\n" (c_header::c_union::prototypes@""::decls)
+  String.concat "\n" (c_header::c_union::c_cleanup::prototypes@""::decls)
 
 let trans_oper = function
 | Vm.Param p -> Param p
