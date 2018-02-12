@@ -84,15 +84,17 @@ let string_of_decl (Decl (func, stmts)) =
   (String.concat "\n" (funchead::str_of_stmts)) ^ "\n}\n"
 
 let c_header =
-  "#include <stdio.h>\n" ^
-  "#include <stdlib.h>\n"
+"#include <stdio.h>
+#include <stdlib.h>
+"
 
 let c_union =
-  "typedef union MLType {\n" ^
-  "  int value;\n" ^
-  "  union MLType (*func)(union MLType, union MLType);\n" ^
-  "  union MLType *tuple;\n" ^
-  "} _t;\n"
+"typedef union MLType {
+  int value;
+  union MLType (*func)(union MLType, union MLType);
+  union MLType *tuple;
+} _t;
+"
 
 let c_cleanup =
 "void cleanup (int status, void *tuple) {
@@ -101,10 +103,11 @@ let c_cleanup =
 "
 
 let c_main =
-  "int main (void) {\n" ^
-  "  printf(\"%d\\n\", _toplevel((_t){0}, (_t){0}).value);\n" ^
-  "  return 0;\n" ^
-  "}\n"
+"int main (void) {
+  printf(\"%d\\n\", _toplevel((_t){0}, (_t){0}).value);
+  return 0;
+}
+"
 
 let string_of_code code =
   let prototypes = List.map (fun (Decl (name, _)) -> "_t " ^ name ^ "(_t, _t);") code in
