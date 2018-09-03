@@ -63,10 +63,18 @@ let string_of_stmt = function
     "  " ^ string_of_local id ^ " = " ^ string_of_operand oper ^ ".func(" ^ str_of_args ^ ");"
 | Return oper -> "  return " ^ string_of_operand oper ^ ";"
 | Malloc (id, ops) ->
-    let str_of_assigns = String.concat ", " (List.map string_of_operand ops) in
-    let tuple_tmp_name = "tuple_" ^ string_of_local id in
-    "  _t " ^ tuple_tmp_name ^ "[] = {" ^ str_of_assigns ^ "};\n" ^
-    "  " ^ string_of_local id ^ ".tuple = " ^ tuple_tmp_name ^ ";\n"
+    let size = List.length ops in
+    let str_of_assigns =
+      snd @@
+      List.fold_left
+      (fun (idx, buf) op ->
+        (idx + 1, buf ^ "  " ^ string_of_local id ^ ".tuple[" ^ string_of_int idx ^ "] = " ^ string_of_operand op ^ ";\n")
+      )
+      (0, "") ops in
+    "  " ^ string_of_local id ^ ".tuple = malloc(" ^ string_of_int size ^ " * sizeof(_t));\n" ^
+    "  if (" ^ string_of_local id ^ ".tuple == NULL) exit(EXIT_FAILURE);\n" ^
+    "  on_exit(cleanup, " ^ string_of_local id ^ ".tuple);\n" ^
+    str_of_assigns
 | Read (id, oper, ofs) ->
     "  " ^ string_of_local id ^ " = " ^ string_of_operand oper ^ ".tuple[" ^ string_of_int ofs ^ "];"
 
@@ -76,25 +84,34 @@ let string_of_decl (Decl (func, stmts)) =
   (String.concat "\n" (funchead::str_of_stmts)) ^ "\n}\n"
 
 let c_header =
-  "#include <stdio.h>\n"
+"#include <stdio.h>
+"
 
 let c_union =
-  "typedef union MLType {\n" ^
-  "  int value;\n" ^
-  "  union MLType (*func)(union MLType, union MLType);\n" ^
-  "  union MLType *tuple;\n" ^
-  "} _t;\n"
+"typedef union MLType {
+  int value;
+  union MLType (*func)(union MLType, union MLType);
+  union MLType *tuple;
+} _t;
+"
+
+let c_cleanup =
+"void cleanup (int status, void *tuple) {
+  free(tuple);
+}
+"
 
 let c_main =
-  "int main (void) {\n" ^
-  "  printf(\"%d\\n\", _toplevel((_t){0}, (_t){0}).value);\n" ^
-  "  return 0;\n" ^
-  "}\n"
+"int main (void) {
+  printf(\"%d\\n\", _toplevel((_t){0}, (_t){0}).value);
+  return 0;
+}
+"
 
 let string_of_code code =
   let prototypes = List.map (fun (Decl (name, _)) -> "_t " ^ name ^ "(_t, _t);") code in
   let decls = List.rev_append (List.rev_map string_of_decl code) [c_main] in
-  String.concat "\n" (c_header::c_union::prototypes@""::decls)
+  String.concat "\n" (c_header::c_union::c_cleanup::prototypes@""::decls)
 
 let trans_oper = function
 | Vm.Param p -> Param p
