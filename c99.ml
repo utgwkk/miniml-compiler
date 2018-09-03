@@ -76,8 +76,7 @@ let string_of_decl (Decl (func, stmts)) =
   (String.concat "\n" (funchead::str_of_stmts)) ^ "\n}\n"
 
 let c_header =
-  "#include <stdio.h>\n" ^
-  "#include <stdlib.h>\n"
+  "#include <stdio.h>\n"
 
 let c_union =
   "typedef union MLType {\n" ^
