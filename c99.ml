@@ -85,6 +85,7 @@ let string_of_decl (Decl (func, stmts)) =
 
 let c_header =
 "#include <stdio.h>
+#include <stdlib.h>
 "
 
 let c_union =
