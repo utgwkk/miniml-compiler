@@ -30,3 +30,7 @@ parser.ml
 parser.mli
 parser.automaton
 minimlc
+
+# OCamlMakefile
+._d/
+._bcdi/
