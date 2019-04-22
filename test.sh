@@ -4,16 +4,17 @@ set -e
 success=0
 failure=0
 verbosity=${VERBOSITY:=0}
+option=${OPTION:=}
 
 for testcase in input/*.ml;
 do
   set +e
   if [ $verbosity = 0 ]; then
-    ./minimlc $testcase > /dev/null
+    ./minimlc $option $testcase > /dev/null
   elif [ $verbosity = 1 ]; then
-    ./minimlc $testcase
+    ./minimlc $option $testcase
   else
-    ./minimlc -v $testcase
+    ./minimlc $option -v $testcase
   fi
   result=$?
   set -e
