@@ -3,6 +3,7 @@ let dprint s = if !debug then (print_string (s ()) ; flush stdout)
 
 let c99 = ref false
 let mips = ref false
+let llvm = ref false
 let display_cfg = ref false
 let optimize = ref false
 
@@ -46,6 +47,13 @@ let rec compile prompt ichan cont =
     else if !mips then
       let mipscode = Mips_noreg.codegen vmcode
       in Mips_spec.string_of mipscode ^ "\n"
+    else if !llvm then
+      let llvm_module = LlvmIR.codegen !outfile flat in
+      let llvmir = Llvm.string_of_llmodule llvm_module in
+      let context = Llvm.module_context llvm_module in
+      Llvm.dispose_module llvm_module;
+      Llvm.dispose_context context;
+      llvmir
     else
     let armcode =
       if !optimize then
@@ -89,6 +97,8 @@ let aspec = Arg.align [
      " Compile to C code instead of ARM assembly (default: " ^ (string_of_bool !c99) ^ ")");
     ("-M", Arg.Unit (fun () -> mips := true),
      " Compile to mips assembly instead of ARM assembly (default: " ^ (string_of_bool !mips) ^ ")");
+    ("-llvm", Arg.Unit (fun () -> llvm := true),
+     " Comple to LLVM IR (default: " ^ (string_of_bool !llvm) ^ ")");
     ("-v", Arg.Unit (fun () -> debug := true),
      " Print debug info (default: " ^ (string_of_bool !debug) ^ ")");
   ]
