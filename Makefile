@@ -14,6 +14,8 @@ RESULT=minimlc
 
 -include OCamlMakefile
 
+all: bc
+
 .PHONY: test
 test: all
 	./test.sh
